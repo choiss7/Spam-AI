@@ -451,13 +451,13 @@ def compare_llm_results(all_results, output_folder):
     if "휴먼_is_spam" in comparison_df.columns:
         for llm_type in all_results.keys():
             # 스팸 여부 일치율
-            spam_agreement = (comparison_df["휴먼_is_spam"] == comparison_df[f"{llm_type}_is_spam"]).mean()
+            spam_agreement = (comparison_df["휴먼_is_spam"] == (comparison_df[f"{llm_type}_is_spam"] == "스팸")).mean()
             
             # 카테고리 일치율 (휴먼 카테고리가 있는 경우)
             category_agreement = 0.0
             if "휴먼_category" in comparison_df.columns:
                 # 스팸으로 분류된 항목 중에서만 카테고리 일치율 계산
-                spam_items = comparison_df[comparison_df["휴먼_is_spam"] & comparison_df[f"{llm_type}_is_spam"]]
+                spam_items = comparison_df[comparison_df["휴먼_is_spam"] & (comparison_df[f"{llm_type}_is_spam"] == "스팸")]
                 if len(spam_items) > 0:
                     category_agreement = (spam_items["휴먼_category"] == spam_items[f"{llm_type}_category"]).mean()
             
