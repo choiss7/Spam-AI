@@ -114,6 +114,82 @@ def calculate_token_cost(token_usage: Dict[str, int], llm_type: str) -> Dict[str
         "total_cost": total_cost
     }
 
+# 데이터 로드 함수
+def load_data(file_path: str, sample_size: int = None) -> pd.DataFrame:
+    """
+    엑셀 파일에서 데이터를 로드하고 필요한 경우 샘플링합니다.
+    
+    Args:
+        file_path (str): 엑셀 파일 경로
+        sample_size (int, optional): 샘플 크기. None이면 전체 데이터 사용
+        
+    Returns:
+        pd.DataFrame: 로드된 데이터프레임
+    """
+    try:
+        # 엑셀 파일 로드
+        df = pd.read_excel(file_path)
+        logger.info(f"데이터 로드 완료: 총 {len(df)} 행")
+        
+        # 빈 메시지 제거
+        valid_indices = []
+        
+        # 가능한 메시지 컬럼명들
+        possible_message_columns = ["메시지내용", "message_content", "content"]
+        message_column = None
+        
+        # 실제 존재하는 메시지 컬럼 찾기
+        for col in possible_message_columns:
+            if col in df.columns:
+                message_column = col
+                break
+        
+        if message_column is None:
+            logger.error(f"메시지 컬럼을 찾을 수 없습니다. 가능한 컬럼명: {possible_message_columns}")
+            # 샘플 데이터 추가
+            sample_data = pd.DataFrame({
+                "메시지내용": ["안녕하세요, 귀하의 계좌가 해킹되었습니다. 즉시 다음 링크를 클릭하여 정보를 업데이트하세요: http://fake-bank.com"],
+                "스팸여부": ["스팸"]
+            })
+            return sample_data
+        
+        # 유효한 메시지만 필터링
+        for idx, row in df.iterrows():
+            message = row.get(message_column)
+            if pd.isna(message) or message == "" or not isinstance(message, str):
+                logger.warning(f"행 {idx}에 빈 메시지가 있습니다. 건너뜁니다.")
+                continue
+            
+            valid_indices.append(idx)
+        
+        if valid_indices:
+            valid_df = df.iloc[valid_indices].copy()
+            logger.info(f"유효한 메시지 수: {len(valid_df)}")
+        else:
+            logger.warning("유효한 메시지가 없습니다. 샘플 데이터를 사용합니다.")
+            # 샘플 데이터 추가
+            valid_df = pd.DataFrame({
+                message_column: ["안녕하세요, 귀하의 계좌가 해킹되었습니다. 즉시 다음 링크를 클릭하여 정보를 업데이트하세요: http://fake-bank.com"],
+                "스팸여부": ["스팸"]
+            })
+        
+        # 샘플링
+        if sample_size is not None and sample_size > 0 and sample_size < len(valid_df):
+            sampled_df = valid_df.sample(sample_size, random_state=42)
+            logger.info(f"샘플링 완료: {len(sampled_df)} 행")
+            return sampled_df
+        
+        return valid_df
+        
+    except Exception as e:
+        logger.error(f"데이터 로드 중 오류 발생: {str(e)}")
+        # 오류 발생 시 샘플 데이터 반환
+        sample_data = pd.DataFrame({
+            "메시지내용": ["안녕하세요, 귀하의 계좌가 해킹되었습니다. 즉시 다음 링크를 클릭하여 정보를 업데이트하세요: http://fake-bank.com"],
+            "스팸여부": ["스팸"]
+        })
+        return sample_data
+
 # LLM 클라이언트 초기화
 def init_llm_clients() -> Tuple[Optional[OpenAI], Optional[anthropic.Anthropic]]:
     """LLM API 클라이언트를 초기화합니다."""
@@ -174,29 +250,42 @@ def classify_message_openai(client: OpenAI, message: str, system_prompt: str) ->
         
         # 프롬프트 히스토리에 추가
         prompt_history.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "model": LLM_SETTINGS["openai"]["model"],
+            "provider": "openai",
+            "input": message,
             "system_prompt": system_prompt,
-            "user_message": message,
-            "response": response_text,
-            "processing_time": end_time - start_time,
+            "output": response_text,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "input_cost": token_cost["input_cost"],
             "output_cost": token_cost["output_cost"],
-            "total_cost": token_cost["total_cost"]
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
         })
         
         # JSON 파싱
         try:
             result = json.loads(response_text)
-            return result, {**token_usage, **token_cost}
         except json.JSONDecodeError:
-            logger.error(f"JSON 파싱 오류: {response_text}")
-            return {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}, {**token_usage, **token_cost}
-            
+            logger.warning(f"JSON 파싱 오류: {response_text}")
+            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+        
+        # 토큰 사용량 및 비용 정보 추가
+        usage_info = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        }
+        
+        return result, usage_info
+        
     except Exception as e:
-        logger.error(f"OpenAI API 호출 중 오류: {e}")
+        logger.error(f"OpenAI API 호출 중 오류: {str(e)}")
         return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
 
 # 메시지 분류 함수 (Anthropic)
@@ -233,29 +322,42 @@ def classify_message_anthropic(client: anthropic.Anthropic, message: str, system
         
         # 프롬프트 히스토리에 추가
         prompt_history.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "model": LLM_SETTINGS["anthropic"]["model"],
+            "provider": "anthropic",
+            "input": message,
             "system_prompt": system_prompt,
-            "user_message": message,
-            "response": response_text,
-            "processing_time": end_time - start_time,
+            "output": response_text,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "input_cost": token_cost["input_cost"],
             "output_cost": token_cost["output_cost"],
-            "total_cost": token_cost["total_cost"]
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
         })
         
         # JSON 파싱
         try:
             result = json.loads(response_text)
-            return result, {**token_usage, **token_cost}
         except json.JSONDecodeError:
-            logger.error(f"JSON 파싱 오류: {response_text}")
-            return {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}, {**token_usage, **token_cost}
+            logger.warning(f"JSON 파싱 오류: {response_text}")
+            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+        
+        # 토큰 사용량 및 비용 정보 추가
+        usage_info = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        }
+        
+        return result, usage_info
             
     except Exception as e:
-        logger.error(f"Anthropic API 호출 중 오류: {e}")
+        logger.error(f"Anthropic API 호출 중 오류: {str(e)}")
         return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
 
 # 스팸 분류 실행 함수
@@ -279,37 +381,7 @@ def run_spam_classification(
     openai_client, anthropic_client = init_llm_clients()
     
     # 데이터 로드
-    try:
-        df = pd.read_excel(file_path)
-        logger.info(f"데이터가 로드되었습니다. 행 수: {len(df)}")
-        
-        # 빈 메시지 제거
-        valid_messages = []
-        for idx, row in df.iterrows():
-            message_content = ""
-            if "메시지내용" in row:
-                message_content = str(row["메시지내용"])
-            elif "message_content" in row:
-                message_content = str(row["message_content"])
-            elif "content" in row:
-                message_content = str(row["content"])
-            
-            if not pd.isna(message_content) and message_content.strip() != "":
-                valid_messages.append(idx)
-            else:
-                logger.warning(f"행 {idx}에 빈 메시지가 있습니다. 건너뜁니다.")
-        
-        # 유효한 메시지만 선택
-        df = df.loc[valid_messages]
-        logger.info(f"유효한 메시지 수: {len(df)}")
-        
-        # 샘플 크기 설정
-        if sample_size is not None and sample_size > 0 and sample_size < len(df):
-            df = df.sample(sample_size, random_state=42)
-            logger.info(f"샘플 {sample_size}개가 선택되었습니다.")
-    except Exception as e:
-        logger.error(f"데이터 로드 중 오류: {e}")
-        return {"error": f"데이터 로드 중 오류: {e}"}
+    df = load_data(file_path, sample_size)
     
     # 시스템 프롬프트 설정
     system_prompt = SYSTEM_PROMPT_TEMPLATE
@@ -322,12 +394,10 @@ def run_spam_classification(
     for idx, row in df.iterrows():
         # 메시지 내용 추출
         message_content = ""
-        if "메시지내용" in row:
-            message_content = str(row["메시지내용"])
-        elif "message_content" in row:
-            message_content = str(row["message_content"])
-        elif "content" in row:
-            message_content = str(row["content"])
+        for col in ["메시지내용", "message_content", "content"]:
+            if col in row and not pd.isna(row[col]) and row[col].strip() != "":
+                message_content = str(row[col])
+                break
         
         # 빈 메시지 처리
         if pd.isna(message_content) or message_content.strip() == "":
@@ -400,12 +470,10 @@ def run_spam_classification(
             
             # 메시지 내용 추출
             message_content = ""
-            if "메시지내용" in row:
-                message_content = str(row["메시지내용"])
-            elif "message_content" in row:
-                message_content = str(row["message_content"])
-            elif "content" in row:
-                message_content = str(row["content"])
+            for col in ["메시지내용", "message_content", "content"]:
+                if col in row and not pd.isna(row[col]) and row[col].strip() != "":
+                    message_content = str(row[col])
+                    break
             
             # 빈 메시지 건너뛰기
             if pd.isna(message_content) or message_content.strip() == "":
@@ -544,19 +612,16 @@ def run_spam_classification(
             for prompt in prompt_history:
                 f.write(f"시간: {prompt['timestamp']}\n")
                 f.write(f"모델: {prompt['model']}\n")
+                f.write(f"제공자: {prompt['provider']}\n")
                 f.write(f"시스템 프롬프트: {prompt['system_prompt']}\n")
-                f.write(f"사용자 메시지: {prompt['user_message']}\n")
-                f.write(f"응답: {prompt['response']}\n")
-                f.write(f"처리 시간: {prompt['processing_time']:.2f}초\n")
+                f.write(f"입력 메시지: {prompt['input']}\n")
+                f.write(f"출력 응답: {prompt['output']}\n")
+                f.write(f"응답 시간: {prompt['response_time']:.2f}초\n")
                 f.write(f"입력 토큰: {prompt['input_tokens']}\n")
                 f.write(f"출력 토큰: {prompt['output_tokens']}\n")
-                
-                # 토큰 비용 정보 추가
-                if 'input_cost' in prompt and 'output_cost' in prompt and 'total_cost' in prompt:
-                    f.write(f"입력 토큰 비용: ${prompt['input_cost']:.6f}\n")
-                    f.write(f"출력 토큰 비용: ${prompt['output_cost']:.6f}\n")
-                    f.write(f"총 비용: ${prompt['total_cost']:.6f}\n")
-                
+                f.write(f"입력 토큰 비용: ${prompt['input_cost']:.6f}\n")
+                f.write(f"출력 토큰 비용: ${prompt['output_cost']:.6f}\n")
+                f.write(f"총 비용: ${prompt['total_cost']:.6f}\n")
                 f.write("-" * 80 + "\n")
         
         # 분류 요약 저장
@@ -591,7 +656,25 @@ def run_spam_classification(
             f.write(f"- 총 비용: ${total_cost['total_cost']:.6f}\n")
             f.write(f"- 메시지당 평균 비용: ${total_cost['total_cost']/len(results_df) if len(results_df) > 0 else 0:.6f}\n\n")
             
-            f.write("참고: 비용은 USD 기준이며, 실제 비용은 API 제공업체의 가격 정책에 따라 다를 수 있습니다.\n")
+            f.write("비용 세부 정보:\n")
+            f.write(f"- 사용 모델: {LLM_SETTINGS[llm_type]['model']}\n")
+            f.write(f"- 제공자: {llm_type}\n")
+            
+            # 모델별 가격 정보
+            if llm_type in LLM_PRICING:
+                pricing = LLM_PRICING[llm_type]
+                f.write(f"- 입력 토큰 가격: ${pricing['input']:.6f} / 백만 토큰\n")
+                f.write(f"- 출력 토큰 가격: ${pricing['output']:.6f} / 백만 토큰\n")
+            
+            # 비용 통계
+            if len(results_df) > 0:
+                f.write(f"- 최소 메시지 비용: ${results_df['total_cost'].min():.6f}\n")
+                f.write(f"- 최대 메시지 비용: ${results_df['total_cost'].max():.6f}\n")
+                f.write(f"- 중간값 메시지 비용: ${results_df['total_cost'].median():.6f}\n")
+                f.write(f"- 비용 표준편차: ${results_df['total_cost'].std():.6f}\n")
+            
+            f.write("\n참고: 비용은 USD 기준이며, 실제 비용은 API 제공업체의 가격 정책에 따라 다를 수 있습니다.\n")
+            f.write("      ExaOne 모델은 무료로 설정되어 있습니다.\n")
         
         # 시각화: 카테고리 분포
         if len(spam_types) > 0:
@@ -634,6 +717,62 @@ def run_spam_classification(
             plt.text(0.5, 0.5, '데이터가 없습니다', ha='center', va='center', transform=plt.gca().transAxes)
             plt.tight_layout()
             plt.savefig(f"{result_folder}/confidence_distribution.png")
+            
+        # 시각화: 비용 정보
+        if len(results_df) > 0:
+            plt.figure(figsize=(10, 6))
+            
+            # 비용 데이터 준비
+            cost_data = {
+                '입력 토큰 비용': total_cost['input_cost'],
+                '출력 토큰 비용': total_cost['output_cost']
+            }
+            
+            # 파이 차트 생성
+            plt.pie(
+                cost_data.values(), 
+                labels=cost_data.keys(), 
+                autopct='%1.1f%%',
+                startangle=90,
+                colors=['#66b3ff', '#ff9999']
+            )
+            plt.axis('equal')  # 원형 파이 차트를 위해
+            plt.title(f'토큰 비용 분포 (총 ${total_cost["total_cost"]:.4f})')
+            plt.tight_layout()
+            plt.savefig(f"{result_folder}/token_cost_distribution.png")
+            
+            # 메시지별 비용 분포 히스토그램
+            plt.figure(figsize=(10, 6))
+            plt.hist(results_df['total_cost'], bins=10, alpha=0.7, color='#99ff99')
+            plt.axvline(
+                results_df['total_cost'].mean(), 
+                color='r', 
+                linestyle='--', 
+                label=f'평균: ${results_df["total_cost"].mean():.6f}'
+            )
+            plt.title('메시지별 비용 분포')
+            plt.xlabel('비용 (USD)')
+            plt.ylabel('메시지 수')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(f"{result_folder}/message_cost_distribution.png")
+            
+            # 토큰 사용량과 비용 관계 산점도
+            plt.figure(figsize=(10, 6))
+            plt.scatter(
+                results_df['input_tokens'] + results_df['output_tokens'],
+                results_df['total_cost'],
+                alpha=0.7,
+                c='#ff9966'
+            )
+            plt.title('토큰 사용량과 비용 관계')
+            plt.xlabel('총 토큰 수')
+            plt.ylabel('비용 (USD)')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            plt.savefig(f"{result_folder}/token_cost_relationship.png")
+        else:
+            logger.warning("비용 정보를 시각화할 데이터가 없습니다.")
         
         # 인간 분류와 LLM 분류 비교 (인간 분류 데이터가 있는 경우)
         if "human_classification" in results_df.columns:
