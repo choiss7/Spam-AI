@@ -1,0 +1,25 @@
+# LLM 모델 비교 분석 결과 요약
+
+## 비교된 LLM 모델
+- OPENAI: gpt-4o
+- CLAUDE-BEDROCK: anthropic.claude-3-5-sonnet-20240620-v1:0
+- EXAONE: /models/exaone
+
+## 분석된 메시지 수: 2
+
+
+## LLM 모델 간 일치율
+- OPENAI vs CLAUDE-BEDROCK:
+  - 스팸 여부 일치율: 100.00%
+  - 카테고리 일치율: 100.00%
+- OPENAI vs EXAONE:
+  - 스팸 여부 일치율: 50.00%
+  - 카테고리 일치율: 50.00%
+- CLAUDE-BEDROCK vs EXAONE:
+  - 스팸 여부 일치율: 50.00%
+  - 카테고리 일치율: 50.00%
+
+## 각 LLM 모델별 스팸 비율
+- OPENAI: 50.00%
+- CLAUDE-BEDROCK: 50.00%
+- EXAONE: 100.00%

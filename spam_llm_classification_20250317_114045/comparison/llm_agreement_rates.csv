@@ -1,0 +1,4 @@
+﻿LLM1,LLM2,스팸_여부_일치율,카테고리_일치율
+openai,claude-bedrock,1.0,1.0
+openai,exaone,0.5,0.5
+claude-bedrock,exaone,0.5,0.5
