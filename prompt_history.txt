@@ -60,4 +60,12 @@
 - 수정 내용:
   1. 결과 CSV 파일에서 classification과 spam_criteria 항목 삭제
   2. 내부 처리에는 여전히 필요한 필드이므로 저장 시에만 제외
-- 커밋: "CSV 파일에서 classification과 spam_criteria 항목 삭제" 
+- 커밋: "CSV 파일에서 classification과 spam_criteria 항목 삭제"
+
+### 4. 휴먼 분류와 LLM 분류 비교 분석 추가
+- 기능: 결과 요약 파일에 휴먼 분류와 LLM 분류 결과 비교 정보 추가
+- 추가 내용:
+  1. 휴먼 분류와 LLM 분류의 스팸/비스팸 건수 통계 추가
+  2. 분류 일치/불일치 건수 및 비율 계산
+  3. 거짓 양성(False Positive)과 거짓 음성(False Negative) 오분류 분석
+- 커밋: "classification_summary.txt에 휴먼 분류와 LLM 분류 비교 분석 추가" 
