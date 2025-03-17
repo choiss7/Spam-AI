@@ -56,9 +56,10 @@ def parse_arguments():
     parser.add_argument(
         "--llm", "-l",
         type=str,
+        nargs="+",  # 여러 LLM 유형을 받을 수 있도록 수정
         choices=available_llm_types,
-        default="local_ai" if "local_ai" in available_llm_types else available_llm_types[0] if available_llm_types else None,
-        help=f"사용할 LLM 유형 (기본값: local_ai)"
+        default=["local_ai"] if "local_ai" in available_llm_types else [available_llm_types[0]] if available_llm_types else None,
+        help=f"사용할 LLM 유형 (여러 개 지정 가능, 기본값: local_ai)"
     )
     
     parser.add_argument(
@@ -102,14 +103,16 @@ def display_settings(args, output_folder, branch_name=None):
     """현재 설정을 표시합니다."""
     print("\n=== 스팸 분류 설정 ===")
     print(f"파일 경로: {args.file}")
-    print(f"LLM 유형: {args.llm}")
+    print(f"LLM 유형: {', '.join(args.llm)}")
     
-    if args.llm == "local_ai":
-        from config import LOCAL_AI_SETTINGS
-        print(f"Local AI 기본 URL: {LOCAL_AI_SETTINGS['base_url']}")
-        print(f"Local AI 모델: {LOCAL_AI_SETTINGS['model']}")
-    else:
-        print(f"LLM 모델: {LLM_SETTINGS[args.llm]['model']}")
+    # 각 LLM 유형별 모델 정보 표시
+    for llm_type in args.llm:
+        if llm_type == "local_ai":
+            from config import LOCAL_AI_SETTINGS
+            print(f"- Local AI 기본 URL: {LOCAL_AI_SETTINGS['base_url']}")
+            print(f"- Local AI 모델: {LOCAL_AI_SETTINGS['model']}")
+        else:
+            print(f"- {llm_type.upper()} 모델: {LLM_SETTINGS[llm_type]['model']}")
     
     if args.sample == 0:
         print("샘플 크기: 전체 데이터")
@@ -235,7 +238,7 @@ def main():
         f.write(f"## 분석 시작 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write(f"### 명령줄 인수:\n")
         f.write(f"- 파일 경로: {args.file}\n")
-        f.write(f"- LLM 유형: {args.llm}\n")
+        f.write(f"- LLM 유형: {', '.join(args.llm)}\n")
         f.write(f"- 샘플 크기: {'전체 데이터' if sample_size is None else sample_size}\n")
         f.write(f"- 결과 저장 경로: {output_folder}\n")
         if not args.no_git:
@@ -247,27 +250,52 @@ def main():
         if not os.path.exists(args.file):
             raise FileNotFoundError(f"파일을 찾을 수 없습니다: {args.file}")
         
-        # 스팸 분류 실행
-        print(f"스팸 분류 시작...")
-        df = classify_spam_messages(args.file, args.llm, sample_size)
-        
-        # 분류 결과 분석 및 시각화
-        print(f"분류 결과 분석 중...")
-        analyze_classification_results(df, output_folder, args.llm)
-        
-        # 프롬프트 히스토리 업데이트
-        with open(prompt_history_file, "a", encoding="utf-8") as f:
-            f.write(f"### 결과: LLM 스팸 분류 완료\n")
-            f.write(f"- 분석된 메시지 수: {len(df)}\n")
-            f.write(f"- 사용된 LLM: {args.llm}\n")
+        # 각 LLM 유형별로 스팸 분류 실행
+        all_results = {}
+        for llm_type in args.llm:
+            print(f"\n{llm_type.upper()} 모델로 스팸 분류 시작...")
             
-            if args.llm == "local_ai":
-                from config import LOCAL_AI_SETTINGS
-                f.write(f"- 사용된 모델: {LOCAL_AI_SETTINGS['model']}\n")
-            else:
-                f.write(f"- 사용된 모델: {LLM_SETTINGS[args.llm]['model']}\n")
+            # LLM별 결과 폴더 생성
+            llm_output_folder = os.path.join(output_folder, llm_type)
+            os.makedirs(llm_output_folder, exist_ok=True)
+            
+            # 스팸 분류 실행
+            df = classify_spam_messages(args.file, llm_type, sample_size)
+            
+            # 분류 결과 분석 및 시각화
+            print(f"{llm_type.upper()} 모델 분류 결과 분석 중...")
+            analyze_classification_results(df, llm_output_folder, llm_type)
+            
+            # 결과 저장
+            all_results[llm_type] = df
+            
+            # 프롬프트 히스토리 업데이트
+            with open(prompt_history_file, "a", encoding="utf-8") as f:
+                f.write(f"### {llm_type.upper()} 모델 스팸 분류 완료\n")
+                f.write(f"- 분석된 메시지 수: {len(df)}\n")
                 
-            f.write(f"- 결과 저장 위치: {os.path.abspath(output_folder)}\n\n")
+                if llm_type == "local_ai":
+                    from config import LOCAL_AI_SETTINGS
+                    f.write(f"- 사용된 모델: {LOCAL_AI_SETTINGS['model']}\n")
+                else:
+                    f.write(f"- 사용된 모델: {LLM_SETTINGS[llm_type]['model']}\n")
+                    
+                f.write(f"- 결과 저장 위치: {os.path.abspath(llm_output_folder)}\n\n")
+        
+        # 모든 LLM 결과 비교 분석 (2개 이상의 LLM을 사용한 경우)
+        if len(args.llm) > 1:
+            print("\n여러 LLM 모델 결과 비교 분석 중...")
+            compare_output_folder = os.path.join(output_folder, "comparison")
+            os.makedirs(compare_output_folder, exist_ok=True)
+            
+            # 결과 비교 분석 함수 호출 (이 함수는 별도로 구현 필요)
+            compare_llm_results(all_results, compare_output_folder)
+            
+            # 프롬프트 히스토리 업데이트
+            with open(prompt_history_file, "a", encoding="utf-8") as f:
+                f.write(f"### LLM 모델 결과 비교 분석 완료\n")
+                f.write(f"- 비교된 모델: {', '.join(args.llm)}\n")
+                f.write(f"- 결과 저장 위치: {os.path.abspath(compare_output_folder)}\n\n")
         
         # Git에 결과 푸시 (--no-git 옵션이 없는 경우)
         if not args.no_git:
@@ -282,13 +310,14 @@ def main():
         
         # 결과 요약 표시
         if args.verbose:
-            summary_file = os.path.join(output_folder, "classification_summary.txt")
-            if os.path.exists(summary_file):
-                with open(summary_file, "r", encoding="utf-8") as f:
-                    print("\n=== 분류 결과 요약 ===")
-                    print(f.read())
-            else:
-                print("\n요약 파일을 찾을 수 없습니다.")
+            for llm_type in args.llm:
+                summary_file = os.path.join(output_folder, llm_type, "classification_summary.txt")
+                if os.path.exists(summary_file):
+                    with open(summary_file, "r", encoding="utf-8") as f:
+                        print(f"\n=== {llm_type.upper()} 모델 분류 결과 요약 ===")
+                        print(f.read())
+                else:
+                    print(f"\n{llm_type.upper()} 모델 요약 파일을 찾을 수 없습니다.")
     
     except FileNotFoundError as e:
         print(f"파일 오류: {e}")
@@ -336,6 +365,136 @@ def main():
             )
     
     return 0
+
+# LLM 결과 비교 분석 함수 추가
+def compare_llm_results(all_results, output_folder):
+    """
+    여러 LLM 모델의 분류 결과를 비교 분석합니다.
+    
+    Args:
+        all_results: 각 LLM 모델별 분류 결과 데이터프레임을 담은 딕셔너리
+        output_folder: 비교 결과를 저장할 폴더 경로
+    """
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # 결과 비교를 위한 데이터프레임 생성
+    comparison_data = []
+    
+    # 기준 데이터프레임 (첫 번째 LLM 결과)
+    base_df = next(iter(all_results.values()))
+    
+    # 각 메시지별로 LLM 분류 결과 비교
+    for i, row in base_df.iterrows():
+        message_id = row.get("일련번호", i)
+        message_content = row.get("내용", "")
+        
+        # 각 LLM 모델별 분류 결과 수집
+        result_row = {
+            "메시지_ID": message_id,
+            "내용": message_content[:100] + "..." if len(message_content) > 100 else message_content
+        }
+        
+        # 각 LLM 모델의 분류 결과 추가
+        for llm_type, df in all_results.items():
+            if i in df.index:
+                result_row[f"{llm_type}_is_spam"] = df.at[i, "llm_is_spam"]
+                result_row[f"{llm_type}_category"] = df.at[i, "llm_category"]
+                result_row[f"{llm_type}_confidence"] = df.at[i, "llm_confidence"]
+                
+                # 모델별 reason 필드 추가
+                if llm_type == "openai" and "gpt_reason" in df.columns:
+                    result_row[f"{llm_type}_reason"] = df.at[i, "gpt_reason"]
+                elif llm_type == "anthropic":
+                    if "claude_reason" in df.columns:
+                        result_row[f"{llm_type}_reason"] = df.at[i, "claude_reason"]
+                    elif "exaone_reason" in df.columns:
+                        result_row[f"{llm_type}_reason"] = df.at[i, "exaone_reason"]
+                elif "local_ai_reason" in df.columns:
+                    result_row[f"{llm_type}_reason"] = df.at[i, "local_ai_reason"]
+        
+        comparison_data.append(result_row)
+    
+    # 비교 데이터프레임 생성
+    comparison_df = pd.DataFrame(comparison_data)
+    
+    # 결과 저장
+    comparison_df.to_csv(os.path.join(output_folder, "llm_comparison_results.csv"), index=False, encoding="utf-8-sig")
+    
+    # 일치율 분석
+    if len(all_results) > 1:
+        llm_types = list(all_results.keys())
+        agreement_data = []
+        
+        # 모든 LLM 쌍에 대해 일치율 계산
+        for i in range(len(llm_types)):
+            for j in range(i+1, len(llm_types)):
+                llm1 = llm_types[i]
+                llm2 = llm_types[j]
+                
+                # 스팸 여부 일치율
+                spam_agreement = (comparison_df[f"{llm1}_is_spam"] == comparison_df[f"{llm2}_is_spam"]).mean()
+                
+                # 카테고리 일치율
+                category_agreement = (comparison_df[f"{llm1}_category"] == comparison_df[f"{llm2}_category"]).mean()
+                
+                agreement_data.append({
+                    "LLM1": llm1,
+                    "LLM2": llm2,
+                    "스팸_여부_일치율": spam_agreement,
+                    "카테고리_일치율": category_agreement
+                })
+        
+        # 일치율 데이터프레임 생성
+        agreement_df = pd.DataFrame(agreement_data)
+        agreement_df.to_csv(os.path.join(output_folder, "llm_agreement_rates.csv"), index=False, encoding="utf-8-sig")
+        
+        # 일치율 시각화
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x="LLM1", y="스팸_여부_일치율", hue="LLM2", data=agreement_df)
+        plt.title("LLM 모델 간 스팸 여부 일치율")
+        plt.ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, "spam_agreement_rates.png"))
+        plt.close()
+        
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x="LLM1", y="카테고리_일치율", hue="LLM2", data=agreement_df)
+        plt.title("LLM 모델 간 카테고리 일치율")
+        plt.ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, "category_agreement_rates.png"))
+        plt.close()
+    
+    # 요약 정보 저장
+    with open(os.path.join(output_folder, "comparison_summary.txt"), "w", encoding="utf-8") as f:
+        f.write("# LLM 모델 비교 분석 결과 요약\n\n")
+        f.write(f"## 비교된 LLM 모델\n")
+        for llm_type in all_results.keys():
+            if llm_type == "local_ai":
+                from config import LOCAL_AI_SETTINGS
+                f.write(f"- {llm_type.upper()}: {LOCAL_AI_SETTINGS['model']}\n")
+            else:
+                f.write(f"- {llm_type.upper()}: {LLM_SETTINGS[llm_type]['model']}\n")
+        
+        f.write(f"\n## 분석된 메시지 수: {len(comparison_df)}\n\n")
+        
+        if len(all_results) > 1:
+            f.write(f"## LLM 모델 간 일치율\n")
+            for _, row in agreement_df.iterrows():
+                f.write(f"- {row['LLM1'].upper()} vs {row['LLM2'].upper()}:\n")
+                f.write(f"  - 스팸 여부 일치율: {row['스팸_여부_일치율']:.2%}\n")
+                f.write(f"  - 카테고리 일치율: {row['카테고리_일치율']:.2%}\n")
+        
+        # 각 LLM 모델별 스팸 비율
+        f.write(f"\n## 각 LLM 모델별 스팸 비율\n")
+        for llm_type in all_results.keys():
+            spam_ratio = comparison_df[f"{llm_type}_is_spam"].mean()
+            f.write(f"- {llm_type.upper()}: {spam_ratio:.2%}\n")
+    
+    print(f"LLM 모델 비교 분석이 완료되었습니다. 결과는 '{output_folder}' 폴더에 저장되었습니다.")
+    return comparison_df
 
 if __name__ == "__main__":
     sys.exit(main()) 
