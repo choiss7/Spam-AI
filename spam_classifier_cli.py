@@ -148,7 +148,7 @@ def main():
         
         # 분류 결과 분석 및 시각화
         print(f"분류 결과 분석 중...")
-        analyze_classification_results(df, output_folder)
+        analyze_classification_results(df, output_folder, args.llm)
         
         # 프롬프트 히스토리 업데이트
         with open(prompt_history_file, "a", encoding="utf-8") as f:

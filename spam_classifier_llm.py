@@ -322,7 +322,15 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     df["llm_is_spam"] = None
     df["llm_category"] = None
     df["llm_confidence"] = None
-    df["llm_reason"] = None
+    
+    # llm_reason을 모델별 필드로 변경
+    if llm_type == "openai":
+        df["gpt_reason"] = None
+    elif llm_type == "anthropic":
+        df["exaone_reason"] = None
+    else:
+        df["local_ai_reason"] = None
+        
     df["llm_model"] = None
     
     # 분류 함수 선택
@@ -346,7 +354,15 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
                 df.at[i, "llm_is_spam"] = False
                 df.at[i, "llm_category"] = "분류 불가"
                 df.at[i, "llm_confidence"] = 0.0
-                df.at[i, "llm_reason"] = "메시지 내용이 비어 있습니다."
+                
+                # 모델별 reason 필드 설정
+                if llm_type == "openai":
+                    df.at[i, "gpt_reason"] = "메시지 내용이 비어 있습니다."
+                elif llm_type == "anthropic":
+                    df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
+                else:
+                    df.at[i, "local_ai_reason"] = "메시지 내용이 비어 있습니다."
+                    
                 df.at[i, "llm_model"] = LLM_SETTINGS[llm_type]["model"]
                 continue
         except KeyError:
@@ -360,7 +376,15 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         df.at[i, "llm_is_spam"] = result.get("is_spam")
         df.at[i, "llm_category"] = result.get("category")
         df.at[i, "llm_confidence"] = result.get("confidence")
-        df.at[i, "llm_reason"] = result.get("reason")
+        
+        # 모델별 reason 필드 설정
+        if llm_type == "openai":
+            df.at[i, "gpt_reason"] = result.get("reason")
+        elif llm_type == "anthropic":
+            df.at[i, "exaone_reason"] = result.get("reason")
+        else:
+            df.at[i, "local_ai_reason"] = result.get("reason")
+            
         df.at[i, "llm_model"] = result.get("model")
         
         # API 호출 제한을 위한 대기 시간
@@ -369,14 +393,24 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     return df
 
 # 분류 결과 분석 및 시각화 함수
-def analyze_classification_results(df, result_folder):
+def analyze_classification_results(df, result_folder, llm_type=None):
     """
     분류 결과를 분석하고 시각화합니다.
     
     Args:
         df: 분류 결과가 포함된 데이터프레임
         result_folder: 결과를 저장할 폴더 경로
+        llm_type: 사용된 LLM 유형 (openai, anthropic, local_ai)
     """
+    # 결과 저장 전에 모델별 reason 필드 처리
+    # 모델별 reason 필드가 있는지 확인하고 없으면 빈 열 추가
+    if llm_type == "openai" and "gpt_reason" not in df.columns:
+        df["gpt_reason"] = None
+    elif llm_type == "anthropic" and "exaone_reason" not in df.columns:
+        df["exaone_reason"] = None
+    elif llm_type == "local_ai" and "local_ai_reason" not in df.columns:
+        df["local_ai_reason"] = None
+    
     # 결과 저장
     df.to_csv(os.path.join(result_folder, "classification_results.csv"), index=False, encoding="utf-8-sig")
     
@@ -484,7 +518,7 @@ def main():
         df = classify_spam_messages(file_path, llm_type, sample_size)
         
         # 분류 결과 분석 및 시각화
-        analyze_classification_results(df, result_folder)
+        analyze_classification_results(df, result_folder, llm_type)
         
         # 프롬프트 히스토리 업데이트
         with open(prompt_history_file, "a", encoding="utf-8") as f:
