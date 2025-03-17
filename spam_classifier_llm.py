@@ -859,6 +859,43 @@ def run_spam_classification(
             f.write(f"- 스팸 메시지 수: {spam_count} ({spam_ratio:.1%})\n")
             f.write(f"- 비스팸 메시지 수: {len(results_df) - spam_count} ({1-spam_ratio:.1%})\n\n")
             
+            # 휴먼 분류와 LLM 분류 결과 비교 추가
+            if "휴먼 분류" in results_df.columns:
+                human_spam_count = results_df["휴먼 분류"].apply(lambda x: "스팸" in str(x) if x is not None else False).sum()
+                human_not_spam_count = len(results_df) - human_spam_count
+                
+                # 일치/불일치 건수 계산
+                match_count = results_df.apply(
+                    lambda row: ("스팸" in str(row["is_spam"]) and "스팸" in str(row["휴먼 분류"])) or 
+                                ("스팸" not in str(row["is_spam"]) and "스팸" not in str(row["휴먼 분류"])),
+                    axis=1
+                ).sum()
+                
+                mismatch_count = len(results_df) - match_count
+                
+                f.write("휴먼 분류와 LLM 분류 비교:\n")
+                f.write(f"- 휴먼 스팸 분류 건수: {human_spam_count} ({human_spam_count/len(results_df):.1%})\n")
+                f.write(f"- 휴먼 비스팸 분류 건수: {human_not_spam_count} ({human_not_spam_count/len(results_df):.1%})\n")
+                f.write(f"- LLM 스팸 분류 건수: {spam_count} ({spam_ratio:.1%})\n")
+                f.write(f"- LLM 비스팸 분류 건수: {len(results_df) - spam_count} ({1-spam_ratio:.1%})\n")
+                f.write(f"- 분류 일치 건수: {match_count} ({match_count/len(results_df):.1%})\n")
+                f.write(f"- 분류 불일치 건수: {mismatch_count} ({mismatch_count/len(results_df):.1%})\n\n")
+                
+                # 오분류 유형 분석
+                false_positive = results_df.apply(
+                    lambda row: "스팸" in str(row["is_spam"]) and "스팸" not in str(row["휴먼 분류"]),
+                    axis=1
+                ).sum()
+                
+                false_negative = results_df.apply(
+                    lambda row: "스팸" not in str(row["is_spam"]) and "스팸" in str(row["휴먼 분류"]),
+                    axis=1
+                ).sum()
+                
+                f.write("오분류 유형:\n")
+                f.write(f"- 거짓 양성(False Positive): {false_positive} (LLM은 스팸, 휴먼은 비스팸으로 분류)\n")
+                f.write(f"- 거짓 음성(False Negative): {false_negative} (LLM은 비스팸, 휴먼은 스팸으로 분류)\n\n")
+            
             f.write("스팸 유형 분포:\n")
             for spam_type, count in spam_types.items():
                 f.write(f"- {spam_type}: {count} ({count/spam_count:.1%})\n")
