@@ -135,7 +135,7 @@ def load_data(file_path: str, sample_size: int = None) -> pd.DataFrame:
         valid_indices = []
         
         # 가능한 메시지 컬럼명들
-        possible_message_columns = ["메시지내용", "message_content", "content"]
+        possible_message_columns = ["메시지내용", "message_content", "content", "내용"]
         message_column = None
         
         # 실제 존재하는 메시지 컬럼 찾기
@@ -394,7 +394,7 @@ def run_spam_classification(
     for idx, row in df.iterrows():
         # 메시지 내용 추출
         message_content = ""
-        for col in ["메시지내용", "message_content", "content"]:
+        for col in ["메시지내용", "message_content", "content", "내용"]:
             if col in row and not pd.isna(row[col]) and row[col].strip() != "":
                 message_content = str(row[col])
                 break
@@ -441,7 +441,7 @@ def run_spam_classification(
         
         # 원본 데이터의 필드 추가
         for col in df.columns:
-            if col != "메시지내용" and col != "message_content" and col != "content":
+            if col != "메시지내용" and col != "message_content" and col != "content" and col != "내용":
                 row_result[col] = row[col]
         
         results.append(row_result)
@@ -470,7 +470,7 @@ def run_spam_classification(
             
             # 메시지 내용 추출
             message_content = ""
-            for col in ["메시지내용", "message_content", "content"]:
+            for col in ["메시지내용", "message_content", "content", "내용"]:
                 if col in row and not pd.isna(row[col]) and row[col].strip() != "":
                     message_content = str(row[col])
                     break
@@ -508,7 +508,7 @@ def run_spam_classification(
             
             # 원본 데이터의 필드 추가
             for col in df.columns:
-                if col != "메시지내용" and col != "message_content" and col != "content":
+                if col != "메시지내용" and col != "message_content" and col != "content" and col != "내용":
                     row_result[col] = row[col]
             
             results.append(row_result)
