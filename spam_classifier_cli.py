@@ -463,7 +463,7 @@ def compare_llm_results(all_results, output_folder):
                 # 휴먼 분류와의 일치 여부 추가
                 if has_human_classification:
                     is_human_spam = result_row["휴먼_is_spam"]
-                    is_llm_spam = result_row[f"{llm_type}_is_spam"] == "스팸"
+                    is_llm_spam = "스팸" in str(result_row[f"{llm_type}_is_spam"])
                     result_row[f"{llm_type}_matches_human"] = is_human_spam == is_llm_spam
         
         comparison_data.append(result_row)
@@ -484,23 +484,23 @@ def compare_llm_results(all_results, output_folder):
         
         for llm_type in all_results.keys():
             # 스팸 여부 일치율
-            spam_agreement = (comparison_df["휴먼_is_spam"] == (comparison_df[f"{llm_type}_is_spam"] == "스팸")).mean()
+            spam_agreement = (comparison_df["휴먼_is_spam"] == comparison_df[f"{llm_type}_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)).mean()
             
             # 카테고리 일치율 (휴먼 카테고리가 있는 경우)
             category_agreement = 0.0
             if "휴먼_category" in comparison_df.columns:
                 # 스팸으로 분류된 항목 중에서만 카테고리 일치율 계산
-                spam_items = comparison_df[comparison_df["휴먼_is_spam"] & (comparison_df[f"{llm_type}_is_spam"] == "스팸")]
+                spam_items = comparison_df[comparison_df["휴먼_is_spam"] & comparison_df[f"{llm_type}_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]
                 if len(spam_items) > 0:
                     category_agreement = (spam_items["휴먼_category"] == spam_items[f"{llm_type}_category"]).mean()
             
             # 오분류 분석
             # 1. 휴먼이 스팸으로 분류했지만 LLM이 비스팸으로 분류한 경우 (False Negative)
-            false_negatives = comparison_df[comparison_df["휴먼_is_spam"] & (comparison_df[f"{llm_type}_is_spam"] == "비스팸")]
+            false_negatives = comparison_df[comparison_df["휴먼_is_spam"] & ~comparison_df[f"{llm_type}_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]
             fn_rate = len(false_negatives) / len(comparison_df) if len(comparison_df) > 0 else 0
             
             # 2. 휴먼이 비스팸으로 분류했지만 LLM이 스팸으로 분류한 경우 (False Positive)
-            false_positives = comparison_df[(~comparison_df["휴먼_is_spam"]) & (comparison_df[f"{llm_type}_is_spam"] == "스팸")]
+            false_positives = comparison_df[(~comparison_df["휴먼_is_spam"]) & comparison_df[f"{llm_type}_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]
             fp_rate = len(false_positives) / len(comparison_df) if len(comparison_df) > 0 else 0
             
             # 3. 정확히 분류한 경우 (True Positive + True Negative)
@@ -570,7 +570,7 @@ def compare_llm_results(all_results, output_folder):
             
             # 혼동 행렬 데이터 준비
             y_true = comparison_df["휴먼_is_spam"].astype(int).values
-            y_pred = (comparison_df[f"{llm_type}_is_spam"] == "스팸").astype(int).values
+            y_pred = comparison_df[f"{llm_type}_is_spam"].apply(lambda x: 1 if "스팸" in str(x) else 0 if x is not None else 0).values
             
             # 혼동 행렬 계산
             cm = np.zeros((2, 2), dtype=int)
@@ -714,7 +714,7 @@ def compare_llm_results(all_results, output_folder):
         f.write(f"\n## 각 LLM 모델별 스팸 비율\n")
         for llm_type in all_results.keys():
             # "스팸" 문자열 기준으로 비율 계산
-            spam_ratio = (comparison_df[f"{llm_type}_is_spam"] == "스팸").mean()
+            spam_ratio = comparison_df[f"{llm_type}_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False).mean()
             f.write(f"- {llm_type.upper()}: {spam_ratio:.2%}\n")
         
         # 휴먼 분류 스팸 비율

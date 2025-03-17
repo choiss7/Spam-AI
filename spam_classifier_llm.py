@@ -583,7 +583,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         result = classify_func(message)
         
         # 결과 저장
-        df.at[i, "llm_is_spam"] = "스팸" if result.get("is_spam") else "비스팸"
+        df.at[i, "llm_is_spam"] = result.get("is_spam")
         df.at[i, "llm_category"] = result.get("category")
         df.at[i, "llm_confidence"] = result.get("confidence")
         
@@ -637,8 +637,8 @@ def analyze_classification_results(df, result_folder, llm_type=None):
     df.to_csv(os.path.join(result_folder, "classification_results.csv"), index=False, encoding="utf-8-sig")
     
     # 기본 통계 계산
-    # "스팸"/"비스팸" 문자열 기반으로 계산
-    spam_count = (df["llm_is_spam"] == "스팸").sum()
+    # 스팸 문자열 기반으로 계산
+    spam_count = df["llm_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False).sum()
     total_count = len(df)
     spam_ratio = spam_count / total_count if total_count > 0 else 0
     
