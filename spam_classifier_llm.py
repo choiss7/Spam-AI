@@ -375,9 +375,9 @@ def run_spam_classification(
         sample_data = {
             "id": 0,
             "message": "샘플 메시지",
-            "classification": {"is_spam": "비스팸", "spam_type": "알 수 없음", "confidence": 0.0, "explanation": "샘플 데이터"},
+            "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터"},
             "is_spam": "비스팸",
-            "spam_type": "알 수 없음",
+            "spam_type": "샘플 데이터",
             "confidence": 0.0,
             "explanation": "샘플 데이터",
             "token_usage": {"input_tokens": 0, "output_tokens": 0},
