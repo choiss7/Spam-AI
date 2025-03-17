@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 가상 환경
+venv/
+ENV/
+env/
+
+# IDE 관련 파일
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 로그 파일
+*.log
+
+# 결과 폴더
+spam_llm_classification_*/
+spam_analysis_*/
+
+# 개인 설정 파일
+.env
+
+# 엑셀 파일 (필요한 경우 주석 처리)
+# *.xlsx
+
+# 기타
+.DS_Store
+Thumbs.db 
