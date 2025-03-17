@@ -771,7 +771,7 @@ def run_spam_classification(
         # spam_criteria가 비어있는 경우 explanation에서 가져오기
         results_df["spam_criteria"] = results_df.apply(
             lambda row: row["classification"].get("explanation", "") if (row["spam_criteria"] == "" or pd.isna(row["spam_criteria"])) and isinstance(row.get("classification"), dict)
-                   else row.get("result", {}).get("reason", "") if (row["spam_criteria"] == "" or pd.isna(row["spam_criteria"])) and isinstance(row.get("result"), dict)
+                   else row.get("result", {}).get("explanation", "") if (row["spam_criteria"] == "" or pd.isna(row["spam_criteria"])) and isinstance(row.get("result"), dict)
                    else row["spam_criteria"],
             axis=1
         )
@@ -782,7 +782,7 @@ def run_spam_classification(
         )
         
         results_df["explanation"] = results_df.apply(
-            lambda row: row["classification"].get("explanation", "") if isinstance(row.get("classification"), dict) else row.get("result", {}).get("reason", "") if isinstance(row.get("result"), dict) else "",
+            lambda row: row["classification"].get("explanation", "") if isinstance(row.get("classification"), dict) else row.get("result", {}).get("explanation", "") if isinstance(row.get("result"), dict) else "",
             axis=1
         )
         
@@ -902,162 +902,6 @@ def run_spam_classification(
             
             f.write("\n참고: 비용은 USD 기준이며, 실제 비용은 API 제공업체의 가격 정책에 따라 다를 수 있습니다.\n")
             f.write("      ExaOne 모델은 무료로 설정되어 있습니다.\n")
-        
-        # 시각화: 카테고리 분포
-        if len(spam_types) > 0:
-            plt.figure(figsize=(10, 6))
-            spam_types.plot(kind='bar')
-            plt.title('스팸 유형 분포')
-            plt.xlabel('스팸 유형')
-            plt.ylabel('메시지 수')
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/category_distribution.png")
-        else:
-            logger.warning("스팸 유형 분포를 시각화할 데이터가 없습니다.")
-            # 빈 차트 생성
-            plt.figure(figsize=(10, 6))
-            plt.title('스팸 유형 분포 (데이터 없음)')
-            plt.xlabel('스팸 유형')
-            plt.ylabel('메시지 수')
-            plt.text(0.5, 0.5, '데이터가 없습니다', ha='center', va='center', transform=plt.gca().transAxes)
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/category_distribution.png")
-        
-        # 시각화: 신뢰도 분포
-        if len(results_df) > 0 and 'confidence' in results_df.columns:
-            plt.figure(figsize=(10, 6))
-            plt.hist(results_df['confidence'], bins=10, alpha=0.7)
-            plt.axvline(confidence_mean, color='r', linestyle='--', label=f'평균: {confidence_mean:.2f}')
-            plt.title('신뢰도 분포')
-            plt.xlabel('신뢰도')
-            plt.ylabel('메시지 수')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/confidence_distribution.png")
-        else:
-            logger.warning("신뢰도 분포를 시각화할 데이터가 없습니다.")
-            # 빈 차트 생성
-            plt.figure(figsize=(10, 6))
-            plt.title('신뢰도 분포 (데이터 없음)')
-            plt.xlabel('신뢰도')
-            plt.ylabel('메시지 수')
-            plt.text(0.5, 0.5, '데이터가 없습니다', ha='center', va='center', transform=plt.gca().transAxes)
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/confidence_distribution.png")
-            
-        # 시각화: 비용 정보
-        if len(results_df) > 0:
-            plt.figure(figsize=(10, 6))
-            
-            # 비용 데이터 준비
-            cost_data = {
-                '입력 토큰 비용': total_cost['input_cost'],
-                '출력 토큰 비용': total_cost['output_cost']
-            }
-            
-            # NaN 값 확인 및 처리
-            has_nan = False
-            for key, value in cost_data.items():
-                if pd.isna(value):
-                    has_nan = True
-                    cost_data[key] = 0.0
-                    logger.warning(f"{key}에 NaN 값이 있어 0으로 대체합니다.")
-            
-            # 모든 값이 0인 경우 처리
-            if all(v == 0 for v in cost_data.values()):
-                plt.text(0.5, 0.5, '비용 데이터가 없습니다', ha='center', va='center', transform=plt.gca().transAxes)
-                plt.title('토큰 비용 분포 (데이터 없음)')
-            else:
-                # 파이 차트 생성
-                plt.pie(
-                    cost_data.values(), 
-                    labels=cost_data.keys(), 
-                    autopct='%1.1f%%',
-                    startangle=90,
-                    colors=['#66b3ff', '#ff9999']
-                )
-                plt.axis('equal')  # 원형 파이 차트를 위해
-                plt.title(f'토큰 비용 분포 (총 ${total_cost["total_cost"]:.4f})')
-            
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/token_cost_distribution.png")
-            
-            # 메시지별 비용 분포 히스토그램
-            plt.figure(figsize=(10, 6))
-            plt.hist(results_df['total_cost'], bins=10, alpha=0.7, color='#99ff99')
-            plt.axvline(
-                results_df['total_cost'].mean(), 
-                color='r', 
-                linestyle='--', 
-                label=f'평균: ${results_df["total_cost"].mean():.6f}'
-            )
-            plt.title('메시지별 비용 분포')
-            plt.xlabel('비용 (USD)')
-            plt.ylabel('메시지 수')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/message_cost_distribution.png")
-            
-            # 토큰 사용량과 비용 관계 산점도
-            plt.figure(figsize=(10, 6))
-            plt.scatter(
-                results_df['input_tokens'] + results_df['output_tokens'],
-                results_df['total_cost'],
-                alpha=0.7,
-                c='#ff9966'
-            )
-            plt.title('토큰 사용량과 비용 관계')
-            plt.xlabel('총 토큰 수')
-            plt.ylabel('비용 (USD)')
-            plt.grid(True, linestyle='--', alpha=0.7)
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/token_cost_relationship.png")
-            
-            # 스팸 분류 기준 분포 시각화 추가
-            if "spam_criteria" in results_df.columns and spam_count > 0:
-                spam_criteria_counts = results_df[results_df["is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]["spam_criteria"].value_counts()
-                
-                # 빈 문자열 제거
-                spam_criteria_counts = spam_criteria_counts[spam_criteria_counts.index.str.strip() != ""]
-                
-                if len(spam_criteria_counts) > 0:
-                    plt.figure(figsize=(12, 6))
-                    spam_criteria_counts.plot(kind='bar')
-                    plt.title('스팸 분류 기준 분포')
-                    plt.xlabel('분류 기준')
-                    plt.ylabel('메시지 수')
-                    plt.xticks(rotation=45, ha='right')
-                    plt.tight_layout()
-                    plt.savefig(f"{result_folder}/spam_criteria_distribution.png")
-        else:
-            logger.warning("비용 정보를 시각화할 데이터가 없습니다.")
-        
-        # 인간 분류와 LLM 분류 비교 (인간 분류 데이터가 있는 경우)
-        if "human_classification" in results_df.columns:
-            # 혼동 행렬 데이터 준비
-            llm_vs_human = pd.crosstab(
-                results_df["is_spam"].apply(lambda x: "스팸" in x), 
-                results_df["human_classification"].apply(lambda x: "스팸" in str(x)),
-                rownames=['LLM 분류'], 
-                colnames=['인간 분류']
-            )
-            
-            # 시각화: LLM vs 인간 분류
-            plt.figure(figsize=(8, 6))
-            plt.imshow(llm_vs_human, cmap='Blues')
-            
-            # 각 셀에 값 표시
-            for i in range(llm_vs_human.shape[0]):
-                for j in range(llm_vs_human.shape[1]):
-                    plt.text(j, i, llm_vs_human.iloc[i, j], 
-                            ha="center", va="center", color="black")
-            
-            plt.colorbar()
-            plt.title('LLM vs 인간 분류 비교')
-            plt.xticks([0, 1], ['비스팸', '스팸'])
-            plt.yticks([0, 1], ['비스팸', '스팸'])
-            plt.tight_layout()
-            plt.savefig(f"{result_folder}/llm_vs_human_classification.png")
         
         # 결과 반환
         return {
