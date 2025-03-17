@@ -632,8 +632,8 @@ def run_spam_classification(
             "id": idx,
             "message": message_content,
             "classification": result,
-            "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
-            "explanation": result.get("explanation", ""),  # 분류 이유 필드 추가
+            "spam_criteria": result.get("spam_criteria", ""),
+            "explanation": result.get("explanation", ""),
             "input_tokens": token_usage["input_tokens"],
             "output_tokens": token_usage["output_tokens"],
             "input_cost": token_cost["input_cost"],
@@ -704,8 +704,8 @@ def run_spam_classification(
                 "id": row.name,
                 "message": message_content,
                 "classification": result,
-                "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
-                "explanation": result.get("explanation", ""),  # 분류 이유 필드 추가
+                "spam_criteria": result.get("spam_criteria", ""),
+                "explanation": result.get("explanation", ""),
                 "input_tokens": token_usage["input_tokens"],
                 "output_tokens": token_usage["output_tokens"],
                 "input_cost": token_cost["input_cost"],
@@ -739,7 +739,7 @@ def run_spam_classification(
                 "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터", "spam_criteria": ""},
                 "is_spam": "비스팸",
                 "spam_type": "샘플 데이터",
-                "spam_criteria": "",  # 스팸 분류 기준 추가
+                "spam_criteria": "",
                 "confidence": 0.0,
                 "explanation": "샘플 데이터",
                 "input_tokens": 0,
@@ -824,8 +824,9 @@ def run_spam_classification(
         confidence_mean = results_df["confidence"].mean()
         confidence_std = results_df["confidence"].std()
         
-        # 결과 저장
-        results_df.to_csv(f"{result_folder}/classification_results.csv", index=False, encoding="utf-8-sig")
+        # 결과 저장 - classification과 spam_criteria 항목 삭제
+        results_df_export = results_df.drop(columns=['classification', 'spam_criteria'], errors='ignore')
+        results_df_export.to_csv(f"{result_folder}/classification_results.csv", index=False, encoding="utf-8-sig")
         
         # 프롬프트 히스토리 저장
         with open(f"{result_folder}/prompt_history.txt", "w", encoding="utf-8") as f:
