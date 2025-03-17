@@ -22,15 +22,24 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
     print("경고: Anthropic 모듈을 가져올 수 없습니다. Claude 기능은 사용할 수 없습니다.")
 
+try:
+    import boto3
+    BEDROCK_AVAILABLE = True
+except ImportError:
+    BEDROCK_AVAILABLE = False
+    print("경고: boto3 모듈을 가져올 수 없습니다. AWS Bedrock 기능은 사용할 수 없습니다.")
+
 # 설정 파일 가져오기
 from config import (
     OPENAI_API_KEY, 
     ANTHROPIC_API_KEY, 
     LOCAL_AI_SETTINGS,
+    AWS_BEDROCK_SETTINGS,
     LLM_SETTINGS, 
     SPAM_CLASSIFICATION_SETTINGS,
     SYSTEM_PROMPT_TEMPLATE,
-    FILE_PATHS
+    FILE_PATHS,
+    DEFAULT_LLM_PROVIDER
 )
 
 # 한글 폰트 설정 (윈도우 환경)
@@ -73,6 +82,22 @@ def initialize_llm_clients():
             print(f"Anthropic 클라이언트 초기화 실패: {e}")
     else:
         print("Anthropic API 키가 설정되지 않았거나 모듈이 설치되지 않았습니다.")
+    
+    # AWS Bedrock 클라이언트 초기화
+    if BEDROCK_AVAILABLE and AWS_BEDROCK_SETTINGS["access_key_id"] and AWS_BEDROCK_SETTINGS["access_key"]:
+        try:
+            bedrock_runtime = boto3.client(
+                service_name="bedrock-runtime",
+                region_name=AWS_BEDROCK_SETTINGS["region"],
+                aws_access_key_id=AWS_BEDROCK_SETTINGS["access_key_id"],
+                aws_secret_access_key=AWS_BEDROCK_SETTINGS["access_key"]
+            )
+            clients["bedrock"] = bedrock_runtime
+            print("AWS Bedrock 클라이언트가 초기화되었습니다.")
+        except Exception as e:
+            print(f"AWS Bedrock 클라이언트 초기화 실패: {e}")
+    else:
+        print("AWS Bedrock 자격 증명이 설정되지 않았거나 모듈이 설치되지 않았습니다.")
     
     # Local AI 설정
     clients["local_ai"] = {
@@ -193,92 +218,146 @@ def classify_with_local_ai(client_settings, message_content, system_prompt=None)
         system_prompt = SYSTEM_PROMPT_TEMPLATE
     
     try:
-        # 설정에서 모델 및 파라미터 가져오기
         base_url = client_settings["base_url"]
-        model = LLM_SETTINGS["local_ai"]["model"]
-        max_tokens = LLM_SETTINGS["local_ai"]["max_tokens"]
-        temperature = LLM_SETTINGS["local_ai"]["temperature"]
         api_key = client_settings["api_key"]
+        model = LLM_SETTINGS["local_ai"]["model"]
         
-        # API 요청 헤더
         headers = {
             "Content-Type": "application/json"
         }
         
-        # API 키가 있는 경우 헤더에 추가
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         
-        # API 요청 데이터
         data = {
-            "model": model,  # 모델 경로가 이미 /models/exaone 형식으로 설정됨
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message_content}
             ],
-            "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": LLM_SETTINGS["local_ai"]["temperature"],
+            "max_tokens": LLM_SETTINGS["local_ai"]["max_tokens"]
         }
         
-        # API 요청 보내기
         response = requests.post(
             f"{base_url}/chat/completions",
             headers=headers,
             json=data
         )
         
-        # 응답 확인
         if response.status_code == 200:
             response_data = response.json()
             content = response_data["choices"][0]["message"]["content"]
             
-            # ```json 형식 처리
-            if content.startswith("```json"):
-                # ```json과 마지막 ``` 제거
-                content = content.replace("```json", "", 1)
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
-            
-            # JSON 파싱 시도
             try:
                 result = json.loads(content)
-            except json.JSONDecodeError as e:
-                # JSON 파싱 실패 시 텍스트에서 정보 추출 시도
-                print(f"JSON 파싱 실패: {e}")
-                print(f"응답 내용: {content[:200]}...")
-                
-                # 기본 결과 생성
-                is_spam = "스팸" in content.lower()
-                
-                # 카테고리 추출 시도
-                category = "기타"
-                for cat in SPAM_CLASSIFICATION_SETTINGS["spam_categories"]:
-                    if cat in content:
-                        category = cat
-                        break
-                
-                # 수동으로 결과 생성
-                result = {
-                    "is_spam": is_spam,
-                    "category": category if is_spam else None,
-                    "confidence": 0.7,  # 기본값
-                    "reason": content[:100]  # 응답의 처음 100자를 이유로 사용
+                result["model"] = model
+                return result
+            except json.JSONDecodeError:
+                print(f"JSON 파싱 오류: {content}")
+                return {
+                    "is_spam": None,
+                    "category": None,
+                    "confidence": 0,
+                    "reason": "JSON 파싱 오류",
+                    "model": model
                 }
-            
-            result["model"] = model
-            return result
         else:
-            raise Exception(f"API 요청 실패: {response.status_code} - {response.text}")
+            print(f"Local AI API 오류: {response.status_code} - {response.text}")
+            return {
+                "is_spam": None,
+                "category": None,
+                "confidence": 0,
+                "reason": f"API 오류: {response.status_code}",
+                "model": model
+            }
     
     except Exception as e:
         print(f"Local AI 분류 오류: {e}")
         return {
-            "is_spam": True,  # 오류 발생 시 기본값으로 스팸으로 처리
-            "category": "기타",
-            "confidence": 0.5,
+            "is_spam": None,
+            "category": None,
+            "confidence": 0,
             "reason": f"오류 발생: {str(e)}",
             "model": LLM_SETTINGS["local_ai"]["model"]
+        }
+
+# AWS Bedrock을 사용한 스팸 분류 함수
+def classify_with_bedrock(client, message_content, system_prompt=None):
+    """
+    AWS Bedrock을 사용하여 메시지를 스팸으로 분류합니다.
+    
+    Args:
+        client: AWS Bedrock 클라이언트
+        message_content: 분류할 메시지 내용
+        system_prompt: 시스템 프롬프트 (기본값: None)
+        
+    Returns:
+        분류 결과 딕셔너리
+    """
+    if system_prompt is None:
+        system_prompt = SYSTEM_PROMPT_TEMPLATE
+    
+    try:
+        model_id = AWS_BEDROCK_SETTINGS["model"]
+        
+        # 모델 ID에 따라 요청 형식 결정
+        if "anthropic" in model_id:
+            # Anthropic Claude 모델 형식
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": LLM_SETTINGS["bedrock"]["max_tokens"],
+                "temperature": LLM_SETTINGS["bedrock"]["temperature"],
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": message_content}
+                ]
+            }
+        else:
+            # 기본 형식 (다른 모델 지원 시 추가)
+            print(f"지원되지 않는 Bedrock 모델: {model_id}")
+            return {
+                "is_spam": None,
+                "category": None,
+                "confidence": 0,
+                "reason": f"지원되지 않는 모델: {model_id}",
+                "model": model_id
+            }
+        
+        response = client.invoke_model(
+            modelId=model_id,
+            body=json.dumps(request_body)
+        )
+        
+        response_body = json.loads(response.get("body").read())
+        
+        if "anthropic" in model_id:
+            content = response_body.get("content", [{}])[0].get("text", "")
+        else:
+            content = response_body.get("content", "")
+        
+        try:
+            result = json.loads(content)
+            result["model"] = model_id
+            return result
+        except json.JSONDecodeError:
+            print(f"JSON 파싱 오류: {content}")
+            return {
+                "is_spam": None,
+                "category": None,
+                "confidence": 0,
+                "reason": "JSON 파싱 오류",
+                "model": model_id
+            }
+    
+    except Exception as e:
+        print(f"AWS Bedrock 분류 오류: {e}")
+        return {
+            "is_spam": None,
+            "category": None,
+            "confidence": 0,
+            "reason": f"오류 발생: {str(e)}",
+            "model": AWS_BEDROCK_SETTINGS["model"]
         }
 
 # 스팸 분류 실행 함수
@@ -288,7 +367,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     
     Args:
         file_path: 스팸 리스트 엑셀 파일 경로
-        llm_type: 사용할 LLM 유형 ('openai', 'anthropic', 'local_ai')
+        llm_type: 사용할 LLM 유형 ('openai', 'anthropic', 'bedrock', 'local_ai')
         sample_size: 샘플 크기 (None인 경우 전체 데이터 사용)
         
     Returns:
@@ -339,6 +418,8 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         classify_func = lambda msg: classify_with_gpt(clients["openai"], msg)
     elif llm_type == "anthropic":
         classify_func = lambda msg: classify_with_claude(clients["anthropic"], msg)
+    elif llm_type == "bedrock":
+        classify_func = lambda msg: classify_with_bedrock(clients["bedrock"], msg)
     else:  # local_ai
         classify_func = lambda msg: classify_with_local_ai(clients["local_ai"], msg)
     

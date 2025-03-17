@@ -5,48 +5,74 @@ from dotenv import load_dotenv
 # .env 파일 로드 (있는 경우)
 load_dotenv()
 
-# OpenAI API 키
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# 기본 LLM 제공자 설정
+DEFAULT_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 
-# Anthropic API 키
+# OpenAI API 키 및 설정
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL_TOKEN_LIMIT = int(os.getenv("OPENAI_MODEL_TOKEN_LIMIT", "8192"))
+
+# Anthropic API 키 및 설정
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-opus-20240229")
+ANTHROPIC_MODEL_TOKEN_LIMIT = int(os.getenv("ANTHROPIC_MODEL_TOKEN_LIMIT", "100000"))
 
 # Local AI 설정
 LOCAL_AI_SETTINGS = {
-    "base_url": "http://blue1.novamsg.org:4051/v1",
-    "model": "/models/exaone",
-    "api_key": os.getenv("LOCAL_AI_API_KEY", "")  # 필요한 경우 API 키 설정
+    "base_url": os.getenv("LOCAL_AI_BASE_PATH", "http://localhost:8080/v1"),
+    "model": os.getenv("LOCAL_AI_MODEL_PREF", "/models/exaone"),
+    "api_key": os.getenv("LOCAL_AI_API_KEY", ""),
+    "token_limit": int(os.getenv("LOCAL_AI_MODEL_TOKEN_LIMIT", "4096"))
+}
+
+# AWS Bedrock 설정
+AWS_BEDROCK_SETTINGS = {
+    "access_key_id": os.getenv("AWS_BEDROCK_LLM_ACCESS_KEY_ID", ""),
+    "access_key": os.getenv("AWS_BEDROCK_LLM_ACCESS_KEY", ""),
+    "region": os.getenv("AWS_BEDROCK_LLM_REGION", "ap-northeast-2"),
+    "model": os.getenv("AWS_BEDROCK_LLM_MODEL_PREFERENCE", "anthropic.claude-3-5-sonnet-20240620-v1:0"),
+    "token_limit": int(os.getenv("AWS_BEDROCK_LLM_MODEL_TOKEN_LIMIT", "4096"))
 }
 
 # LLM 설정
 LLM_SETTINGS = {
     "openai": {
-        "model": "gpt-4o",  # 또는 다른 모델 (gpt-3.5-turbo, gpt-4 등)
+        "model": OPENAI_MODEL,
         "max_tokens": 1024,
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
+        "token_limit": OPENAI_MODEL_TOKEN_LIMIT
     },
     "anthropic": {
-        "model": "claude-3-opus-20240229",  # 또는 다른 모델 (claude-3-sonnet, claude-3-haiku 등)
+        "model": ANTHROPIC_MODEL,
         "max_tokens": 1024,
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
+        "token_limit": ANTHROPIC_MODEL_TOKEN_LIMIT
     },
     "local_ai": {
         "model": LOCAL_AI_SETTINGS["model"],
         "max_tokens": 1024,
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
+        "token_limit": LOCAL_AI_SETTINGS["token_limit"]
+    },
+    "bedrock": {
+        "model": AWS_BEDROCK_SETTINGS["model"],
+        "max_tokens": 1024,
+        "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
+        "token_limit": AWS_BEDROCK_SETTINGS["token_limit"]
     }
 }
 
 # 스팸 분류 설정
 SPAM_CLASSIFICATION_SETTINGS = {
     # 기본 샘플 크기 (None은 전체 데이터 사용)
-    "default_sample_size": 10,
+    "default_sample_size": int(os.getenv("DEFAULT_SAMPLE_SIZE", "10")),
     
     # 기본 LLM 유형
-    "default_llm_type": "local_ai",
+    "default_llm_type": DEFAULT_LLM_PROVIDER,
     
     # API 호출 간 대기 시간 (초)
-    "api_call_delay": 1,
+    "api_call_delay": float(os.getenv("API_CALL_DELAY", "1.0")),
     
     # 스팸 카테고리 목록
     "spam_categories": [
@@ -86,5 +112,5 @@ JSON 형식으로 다음 필드를 포함하여 응답해주세요:
 
 # 파일 경로 설정
 FILE_PATHS = {
-    "spam_list": "스팸리스트_20250310_개인정보_삭제.xlsx"
+    "spam_list": os.getenv("SPAM_LIST_PATH", "스팸리스트_20250310_개인정보_삭제.xlsx")
 } 
