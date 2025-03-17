@@ -1,0 +1,42 @@
+# 스팸 리스트 LLM 분류 프롬프트 히스토리
+
+## 분석 시작 시간: 2025-03-17 17:25:53
+
+### 명령줄 인수:
+- 파일 경로: data/스팸리스트_20250310_개인정보_삭제.xlsx
+- LLM 유형: openai, claude-bedrock, exaone
+- 샘플 크기: 3
+- 결과 저장 경로: spam_llm_classification_20250317_172553
+- Git 브랜치: 20250317_1725
+
+### OPENAI 모델 스팸 분류 완료
+- 분석된 메시지 수: 0
+- 스팸 비율: 100.0%
+- 사용된 모델: gpt-4o
+- 결과 저장 위치: spam_llm_classification_20250317_172553\openai_20250317_172554
+
+- 토큰 사용량: 입력 0, 출력 0
+- 총 비용: $0.000000
+
+### CLAUDE-BEDROCK 모델 스팸 분류 완료
+- 분석된 메시지 수: 0
+- 스팸 비율: 100.0%
+- 사용된 모델: anthropic.claude-3-5-sonnet-20240620-v1:0
+- 결과 저장 위치: spam_llm_classification_20250317_172553\claude-bedrock_20250317_172557
+
+- 토큰 사용량: 입력 0, 출력 0
+- 총 비용: $0.000000
+
+### EXAONE 모델 스팸 분류 완료
+- 분석된 메시지 수: 0
+- 스팸 비율: 100.0%
+- 사용된 모델: /models/exaone
+- 결과 저장 위치: spam_llm_classification_20250317_172553\exaone_20250317_172558
+
+- 토큰 사용량: 입력 0, 출력 0
+- 총 비용: $0.000000
+
+### LLM 모델 결과 비교 분석 완료
+- 비교된 모델: openai, claude-bedrock, exaone
+- 결과 저장 위치: D:\dev\study\spam-AI\spam_llm_classification_20250317_172553\comparison
+
