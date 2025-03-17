@@ -159,5 +159,6 @@ JSON 형식으로 다음 필드를 포함하여 응답해주세요:
 
 # 파일 경로 설정
 FILE_PATHS = {
-    "spam_list": os.getenv("SPAM_LIST_PATH", "./스팸리스트_20250310_개인정보_삭제.xlsx")
+    "spam_list": os.getenv("SPAM_LIST_PATH", "./스팸리스트_20250310_개인정보_삭제.xlsx"),
+    "output_folder": os.getenv("OUTPUT_FOLDER_PATH", "./spam_llm_classification")
 } 

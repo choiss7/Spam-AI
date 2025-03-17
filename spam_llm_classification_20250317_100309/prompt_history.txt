@@ -1,7 +1,0 @@
-# 스팸 리스트 LLM 분류 프롬프트 히스토리
-
-## 분석 시작 시간: 2025-03-17 10:03:09
-
-### 프롬프트: 스팸리스트 파일을 LLM(클로드, GPT)과 같은 NLP 기반의 분류를 하기 위한 소스 코드 작성
-
-### 오류 발생: zero-size array to reduction operation fmin which has no identity
