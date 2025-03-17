@@ -385,12 +385,33 @@ def compare_llm_results(all_results, output_folder):
     import pandas as pd
     import matplotlib.pyplot as plt
     import seaborn as sns
+    import numpy as np
     
     # 결과 비교를 위한 데이터프레임 생성
     comparison_data = []
     
     # 기준 데이터프레임 (첫 번째 LLM 결과)
     base_df = next(iter(all_results.values()))
+    
+    # 원본 데이터에 휴먼 분류 컬럼이 있는지 확인
+    has_human_classification = False
+    human_spam_column = None
+    human_category_column = None
+    
+    # 가능한 휴먼 분류 컬럼명 확인
+    possible_spam_columns = ["스팸여부", "스팸 여부", "spam_status", "is_spam"]
+    possible_category_columns = ["스팸유형", "스팸 유형", "spam_category", "category"]
+    
+    for col in possible_spam_columns:
+        if col in base_df.columns:
+            has_human_classification = True
+            human_spam_column = col
+            break
+    
+    for col in possible_category_columns:
+        if col in base_df.columns:
+            human_category_column = col
+            break
     
     # 각 메시지별로 LLM 분류 결과 비교
     for i, row in base_df.iterrows():
@@ -403,16 +424,19 @@ def compare_llm_results(all_results, output_folder):
             "내용": message_content[:100] + "..." if len(message_content) > 100 else message_content
         }
         
-        # 원본 데이터의 휴먼 분류 추가 (스팸여부, 스팸유형 컬럼이 있다고 가정)
-        if "스팸여부" in row:
-            result_row["휴먼_is_spam"] = row["스팸여부"] == "스팸"
-        elif "스팸 여부" in row:
-            result_row["휴먼_is_spam"] = row["스팸 여부"] == "스팸"
+        # 원본 데이터의 휴먼 분류 추가
+        if has_human_classification and human_spam_column:
+            human_spam_value = row[human_spam_column]
+            # 다양한 형식의 스팸 값 처리
+            if isinstance(human_spam_value, str):
+                result_row["휴먼_is_spam"] = human_spam_value == "스팸" or human_spam_value.lower() == "spam"
+                result_row["휴먼_스팸여부"] = human_spam_value
+            else:
+                result_row["휴먼_is_spam"] = bool(human_spam_value)
+                result_row["휴먼_스팸여부"] = "스팸" if bool(human_spam_value) else "비스팸"
         
-        if "스팸유형" in row:
-            result_row["휴먼_category"] = row["스팸유형"]
-        elif "스팸 유형" in row:
-            result_row["휴먼_category"] = row["스팸 유형"]
+        if human_category_column and human_category_column in row:
+            result_row["휴먼_category"] = row[human_category_column]
         
         # 각 LLM 모델의 분류 결과 추가
         for llm_type, df in all_results.items():
@@ -435,6 +459,12 @@ def compare_llm_results(all_results, output_folder):
                     result_row[f"{llm_type}_reason"] = df.at[i, "exaone_reason"]
                 elif "local_ai_reason" in df.columns:
                     result_row[f"{llm_type}_reason"] = df.at[i, "local_ai_reason"]
+                
+                # 휴먼 분류와의 일치 여부 추가
+                if has_human_classification:
+                    is_human_spam = result_row["휴먼_is_spam"]
+                    is_llm_spam = result_row[f"{llm_type}_is_spam"] == "스팸"
+                    result_row[f"{llm_type}_matches_human"] = is_human_spam == is_llm_spam
         
         comparison_data.append(result_row)
     
@@ -448,7 +478,10 @@ def compare_llm_results(all_results, output_folder):
     human_comparison_data = []
     
     # 휴먼 분류가 있는 경우에만 비교 분석 수행
-    if "휴먼_is_spam" in comparison_df.columns:
+    if has_human_classification:
+        # 오분류 분석을 위한 데이터프레임
+        misclassification_data = []
+        
         for llm_type in all_results.keys():
             # 스팸 여부 일치율
             spam_agreement = (comparison_df["휴먼_is_spam"] == (comparison_df[f"{llm_type}_is_spam"] == "스팸")).mean()
@@ -461,24 +494,99 @@ def compare_llm_results(all_results, output_folder):
                 if len(spam_items) > 0:
                     category_agreement = (spam_items["휴먼_category"] == spam_items[f"{llm_type}_category"]).mean()
             
+            # 오분류 분석
+            # 1. 휴먼이 스팸으로 분류했지만 LLM이 비스팸으로 분류한 경우 (False Negative)
+            false_negatives = comparison_df[comparison_df["휴먼_is_spam"] & (comparison_df[f"{llm_type}_is_spam"] == "비스팸")]
+            fn_rate = len(false_negatives) / len(comparison_df) if len(comparison_df) > 0 else 0
+            
+            # 2. 휴먼이 비스팸으로 분류했지만 LLM이 스팸으로 분류한 경우 (False Positive)
+            false_positives = comparison_df[(~comparison_df["휴먼_is_spam"]) & (comparison_df[f"{llm_type}_is_spam"] == "스팸")]
+            fp_rate = len(false_positives) / len(comparison_df) if len(comparison_df) > 0 else 0
+            
+            # 3. 정확히 분류한 경우 (True Positive + True Negative)
+            correct_classifications = comparison_df[comparison_df[f"{llm_type}_matches_human"]]
+            accuracy = len(correct_classifications) / len(comparison_df) if len(comparison_df) > 0 else 0
+            
             human_comparison_data.append({
                 "LLM": llm_type,
                 "휴먼_스팸여부_일치율": spam_agreement,
-                "휴먼_카테고리_일치율": category_agreement
+                "휴먼_카테고리_일치율": category_agreement,
+                "정확도": accuracy,
+                "거짓음성비율": fn_rate,  # False Negative Rate
+                "거짓양성비율": fp_rate   # False Positive Rate
             })
+            
+            # 오분류 사례 수집
+            for _, row in false_negatives.iterrows():
+                misclassification_data.append({
+                    "LLM": llm_type,
+                    "메시지_ID": row["메시지_ID"],
+                    "내용": row["내용"],
+                    "휴먼_분류": "스팸",
+                    "LLM_분류": "비스팸",
+                    "오류_유형": "거짓음성(False Negative)",
+                    "LLM_신뢰도": row[f"{llm_type}_confidence"],
+                    "LLM_이유": row.get(f"{llm_type}_reason", "")
+                })
+            
+            for _, row in false_positives.iterrows():
+                misclassification_data.append({
+                    "LLM": llm_type,
+                    "메시지_ID": row["메시지_ID"],
+                    "내용": row["내용"],
+                    "휴먼_분류": "비스팸",
+                    "LLM_분류": "스팸",
+                    "오류_유형": "거짓양성(False Positive)",
+                    "LLM_신뢰도": row[f"{llm_type}_confidence"],
+                    "LLM_이유": row.get(f"{llm_type}_reason", "")
+                })
         
         # 휴먼 비교 데이터프레임 생성
         human_comparison_df = pd.DataFrame(human_comparison_data)
         human_comparison_df.to_csv(os.path.join(output_folder, "human_vs_llm_agreement.csv"), index=False, encoding="utf-8-sig")
         
+        # 오분류 데이터프레임 생성 및 저장
+        if misclassification_data:
+            misclassification_df = pd.DataFrame(misclassification_data)
+            misclassification_df.to_csv(os.path.join(output_folder, "misclassification_analysis.csv"), index=False, encoding="utf-8-sig")
+        
         # 휴먼 vs LLM 일치율 시각화
-        plt.figure(figsize=(10, 6))
-        sns.barplot(x="LLM", y="휴먼_스팸여부_일치율", data=human_comparison_df)
-        plt.title("휴먼 vs LLM 스팸 여부 일치율")
+        plt.figure(figsize=(12, 8))
+        metrics_to_plot = ["휴먼_스팸여부_일치율", "정확도", "거짓음성비율", "거짓양성비율"]
+        melted_df = pd.melt(human_comparison_df, id_vars=["LLM"], value_vars=metrics_to_plot, 
+                           var_name="지표", value_name="값")
+        
+        sns.barplot(x="LLM", y="값", hue="지표", data=melted_df)
+        plt.title("휴먼 vs LLM 분류 성능 지표")
         plt.ylim(0, 1)
+        plt.legend(title="성능 지표")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "human_vs_llm_spam_agreement.png"))
+        plt.savefig(os.path.join(output_folder, "human_vs_llm_metrics.png"))
         plt.close()
+        
+        # 혼동 행렬(Confusion Matrix) 시각화
+        for llm_type in all_results.keys():
+            plt.figure(figsize=(8, 6))
+            
+            # 혼동 행렬 데이터 준비
+            y_true = comparison_df["휴먼_is_spam"].astype(int).values
+            y_pred = (comparison_df[f"{llm_type}_is_spam"] == "스팸").astype(int).values
+            
+            # 혼동 행렬 계산
+            cm = np.zeros((2, 2), dtype=int)
+            for i in range(len(y_true)):
+                cm[y_true[i]][y_pred[i]] += 1
+            
+            # 혼동 행렬 시각화
+            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", 
+                       xticklabels=["비스팸", "스팸"], 
+                       yticklabels=["비스팸", "스팸"])
+            plt.xlabel("LLM 예측")
+            plt.ylabel("휴먼 분류")
+            plt.title(f"{llm_type.upper()} 혼동 행렬")
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_folder, f"{llm_type}_confusion_matrix.png"))
+            plt.close()
         
         if "휴먼_category" in comparison_df.columns:
             plt.figure(figsize=(10, 6))
@@ -488,6 +596,41 @@ def compare_llm_results(all_results, output_folder):
             plt.tight_layout()
             plt.savefig(os.path.join(output_folder, "human_vs_llm_category_agreement.png"))
             plt.close()
+            
+            # 카테고리별 정확도 분석
+            if len(comparison_df) > 0 and "휴먼_category" in comparison_df.columns:
+                for llm_type in all_results.keys():
+                    # 스팸으로 분류된 항목만 필터링
+                    spam_items = comparison_df[comparison_df["휴먼_is_spam"] & (comparison_df[f"{llm_type}_is_spam"] == "스팸")]
+                    
+                    if len(spam_items) > 0:
+                        # 카테고리별 정확도 계산
+                        category_accuracy = []
+                        for category in spam_items["휴먼_category"].unique():
+                            category_items = spam_items[spam_items["휴먼_category"] == category]
+                            accuracy = (category_items["휴먼_category"] == category_items[f"{llm_type}_category"]).mean()
+                            count = len(category_items)
+                            category_accuracy.append({
+                                "카테고리": category,
+                                "정확도": accuracy,
+                                "샘플수": count
+                            })
+                        
+                        if category_accuracy:
+                            # 카테고리별 정확도 데이터프레임 생성
+                            category_df = pd.DataFrame(category_accuracy)
+                            category_df.to_csv(os.path.join(output_folder, f"{llm_type}_category_accuracy.csv"), 
+                                             index=False, encoding="utf-8-sig")
+                            
+                            # 카테고리별 정확도 시각화
+                            plt.figure(figsize=(12, 6))
+                            sns.barplot(x="카테고리", y="정확도", data=category_df)
+                            plt.title(f"{llm_type.upper()} 카테고리별 정확도")
+                            plt.ylim(0, 1)
+                            plt.xticks(rotation=45, ha="right")
+                            plt.tight_layout()
+                            plt.savefig(os.path.join(output_folder, f"{llm_type}_category_accuracy.png"))
+                            plt.close()
     
     # LLM 간 일치율 분석
     if len(all_results) > 1:
@@ -548,12 +691,15 @@ def compare_llm_results(all_results, output_folder):
         f.write(f"\n## 분석된 메시지 수: {len(comparison_df)}\n\n")
         
         # 휴먼 vs LLM 일치율 요약
-        if "휴먼_is_spam" in comparison_df.columns:
+        if has_human_classification:
             f.write(f"## 휴먼 vs LLM 일치율\n")
             for _, row in human_comparison_df.iterrows():
                 f.write(f"- 휴먼 vs {row['LLM'].upper()}:\n")
                 f.write(f"  - 스팸 여부 일치율: {row['휴먼_스팸여부_일치율']:.2%}\n")
-                if "휴먼_category" in comparison_df.columns:
+                f.write(f"  - 정확도: {row['정확도']:.2%}\n")
+                f.write(f"  - 거짓음성비율(FN): {row['거짓음성비율']:.2%}\n")
+                f.write(f"  - 거짓양성비율(FP): {row['거짓양성비율']:.2%}\n")
+                if "휴먼_카테고리_일치율" in row and row["휴먼_카테고리_일치율"] > 0:
                     f.write(f"  - 카테고리 일치율: {row['휴먼_카테고리_일치율']:.2%}\n")
         
         # LLM 간 일치율 요약
@@ -572,9 +718,24 @@ def compare_llm_results(all_results, output_folder):
             f.write(f"- {llm_type.upper()}: {spam_ratio:.2%}\n")
         
         # 휴먼 분류 스팸 비율
-        if "휴먼_is_spam" in comparison_df.columns:
+        if has_human_classification:
             human_spam_ratio = comparison_df["휴먼_is_spam"].mean()
             f.write(f"- 휴먼 분류: {human_spam_ratio:.2%}\n")
+            
+            # 오분류 분석 요약
+            f.write(f"\n## 오분류 분석 요약\n")
+            for llm_type in all_results.keys():
+                f.write(f"### {llm_type.upper()} 모델\n")
+                
+                # 거짓음성(False Negative) 비율
+                fn_rate = human_comparison_df[human_comparison_df["LLM"] == llm_type]["거짓음성비율"].values[0]
+                f.write(f"- 거짓음성(False Negative) 비율: {fn_rate:.2%}\n")
+                f.write(f"  - 휴먼이 스팸으로 분류했지만 LLM이 비스팸으로 분류한 메시지 비율\n")
+                
+                # 거짓양성(False Positive) 비율
+                fp_rate = human_comparison_df[human_comparison_df["LLM"] == llm_type]["거짓양성비율"].values[0]
+                f.write(f"- 거짓양성(False Positive) 비율: {fp_rate:.2%}\n")
+                f.write(f"  - 휴먼이 비스팸으로 분류했지만 LLM이 스팸으로 분류한 메시지 비율\n")
     
     print(f"LLM 모델 비교 분석이 완료되었습니다. 결과는 '{output_folder}' 폴더에 저장되었습니다.")
     return comparison_df
