@@ -1,0 +1,26 @@
+# 스팸 분류 시스템 개발 프롬프트 히스토리
+
+## 2025-03-17
+
+### 1. 지원하지 않은 LLM 유형 에러 수정
+- 문제: Claude Bedrock와 ExaOne 모델 지원 기능 추가 후 발생한 오류 수정
+- 수정 내용:
+  1. Claude Bedrock API 호출 시 response_format 파라미터 제거 (Bedrock API에서 지원하지 않음)
+  2. JSON 파싱 오류 처리 개선 (코드 블록 내 JSON 추출 기능 추가)
+  3. NaN 값 처리 로직 추가 (시각화 과정에서 NaN 값을 0으로 대체)
+- 커밋: "Claude Bedrock와 ExaOne 모델 오류 수정"
+
+### 2. 모델 지원 기능 추가
+- 기능: Claude Bedrock와 ExaOne 모델 지원 기능 추가
+- 추가 내용:
+  1. classify_message_claude_bedrock 함수 구현
+  2. classify_message_exaone 함수 구현
+  3. run_spam_classification 함수에 새 모델 처리 로직 추가
+- 커밋: "claude-bedrock와 exaone 모델 지원 기능 추가"
+
+### 3. spam_criteria 필드 개선
+- 기능: spam_criteria 필드가 비어있는 경우 explanation 내용으로 채우도록 수정
+- 수정 내용:
+  1. 결과 처리 시 spam_criteria 필드가 비어있으면 explanation 또는 reason 필드의 내용으로 대체
+  2. 모든 메시지에 대해 spam_criteria 정보 제공
+- 커밋: "spam_criteria 필드가 비어있는 경우 explanation 내용으로 채우도록 수정" 
