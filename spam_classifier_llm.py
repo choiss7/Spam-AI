@@ -327,6 +327,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     if llm_type == "openai":
         df["gpt_reason"] = None
     elif llm_type == "anthropic":
+        df["claude_reason"] = None
         df["exaone_reason"] = None
     else:
         df["local_ai_reason"] = None
@@ -359,6 +360,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
                 if llm_type == "openai":
                     df.at[i, "gpt_reason"] = "메시지 내용이 비어 있습니다."
                 elif llm_type == "anthropic":
+                    df.at[i, "claude_reason"] = "메시지 내용이 비어 있습니다."
                     df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
                 else:
                     df.at[i, "local_ai_reason"] = "메시지 내용이 비어 있습니다."
@@ -381,6 +383,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         if llm_type == "openai":
             df.at[i, "gpt_reason"] = result.get("reason")
         elif llm_type == "anthropic":
+            df.at[i, "claude_reason"] = result.get("reason")
             df.at[i, "exaone_reason"] = result.get("reason")
         else:
             df.at[i, "local_ai_reason"] = result.get("reason")
@@ -406,8 +409,11 @@ def analyze_classification_results(df, result_folder, llm_type=None):
     # 모델별 reason 필드가 있는지 확인하고 없으면 빈 열 추가
     if llm_type == "openai" and "gpt_reason" not in df.columns:
         df["gpt_reason"] = None
-    elif llm_type == "anthropic" and "exaone_reason" not in df.columns:
-        df["exaone_reason"] = None
+    elif llm_type == "anthropic":
+        if "claude_reason" not in df.columns:
+            df["claude_reason"] = None
+        if "exaone_reason" not in df.columns:
+            df["exaone_reason"] = None
     elif llm_type == "local_ai" and "local_ai_reason" not in df.columns:
         df["local_ai_reason"] = None
     
