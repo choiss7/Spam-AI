@@ -35,8 +35,8 @@ env/
 *.log
 
 # 결과 폴더
-spam_llm_classification_*/
-spam_analysis_*/
+# spam_llm_classification_*/  # 주석 처리하여 포함
+# spam_analysis_*/  # 주석 처리하여 포함
 
 # 개인 설정 파일
 .env

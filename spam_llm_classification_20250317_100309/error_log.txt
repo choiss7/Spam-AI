@@ -1,0 +1,4 @@
+# 오류 정보
+
+## 발생 시간: 2025-03-17 10:03:38
+## 오류 메시지: zero-size array to reduction operation fmin which has no identity

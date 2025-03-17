@@ -1,0 +1,4 @@
+# 오류 정보
+
+## 발생 시간: 2025-03-17 09:29:06
+## 오류 메시지: Length of Index vectors must match length of `data` when both are used, but `data` has length 1610 and the vector passed to `y` has length 21.

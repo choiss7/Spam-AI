@@ -1,0 +1,64 @@
+# 스팸 리스트 기본 정보
+
+## 데이터 크기: (1610, 14)
+
+## 컬럼 목록:
+- 일련번호
+- 접수시간
+- 수신시간
+- 서비스ID
+- 업체명
+- 서비스
+- 메시지 타입
+- 내용
+- KISA 분류
+- AI 분류
+- AI 오류
+- 휴먼 분류
+- AI 모델
+- 엑셀 업로드 일시
+
+## 데이터 타입:
+일련번호           int64
+접수시간          object
+수신시간          object
+서비스ID         object
+업체명           object
+서비스           object
+메시지 타입        object
+내용            object
+KISA 분류       object
+AI 분류         object
+AI 오류        float64
+휴먼 분류         object
+AI 모델         object
+엑셀 업로드 일시    float64
+dtype: object
+
+## 기본 통계:
+              일련번호  AI 오류  엑셀 업로드 일시
+count  1610.000000    0.0        0.0
+mean    805.500000    NaN        NaN
+std     464.911282    NaN        NaN
+min       1.000000    NaN        NaN
+25%     403.250000    NaN        NaN
+50%     805.500000    NaN        NaN
+75%    1207.750000    NaN        NaN
+max    1610.000000    NaN        NaN
+
+## 결측치 정보:
+일련번호            0
+접수시간            0
+수신시간            0
+서비스ID          80
+업체명           100
+서비스            93
+메시지 타입         93
+내용              0
+KISA 분류         0
+AI 분류           0
+AI 오류        1610
+휴먼 분류           0
+AI 모델           0
+엑셀 업로드 일시    1610
+dtype: int64
