@@ -23,11 +23,7 @@ from config import (
 
 # 스팸 분류 모듈 가져오기
 try:
-    from spam_classifier_llm import (
-        classify_spam_messages,
-        analyze_classification_results,
-        run_spam_classification
-    )
+    from spam_classifier_llm import run_spam_classification
     # 사용 가능한 LLM 유형 확인
     from spam_classifier_llm import OPENAI_AVAILABLE, ANTHROPIC_AVAILABLE, BEDROCK_AVAILABLE
 except ImportError as e:
