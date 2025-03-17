@@ -248,8 +248,13 @@ def main():
         f.write("\n")
     
     try:
+        # 파일 경로 처리 - data/ 접두사 제거
+        file_path = args.file
+        if file_path.startswith("data/"):
+            file_path = file_path.replace("data/", "", 1)
+        
         # 파일 존재 확인
-        if not os.path.exists(args.file):
+        if not os.path.exists(file_path):
             raise FileNotFoundError(f"파일을 찾을 수 없습니다: {args.file}")
         
         # 각 LLM 유형별로 스팸 분류 실행
@@ -262,7 +267,7 @@ def main():
             os.makedirs(llm_output_folder, exist_ok=True)
             
             # 스팸 분류 실행
-            df = classify_spam_messages(args.file, llm_type, sample_size)
+            df = classify_spam_messages(file_path, llm_type, sample_size)
             
             # 분류 결과 분석 및 시각화
             print(f"{llm_type.upper()} 모델 분류 결과 분석 중...")
