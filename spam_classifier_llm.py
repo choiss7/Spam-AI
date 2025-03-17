@@ -19,6 +19,7 @@ import tiktoken
 import anthropic
 from openai import OpenAI
 import logging
+import boto3
 
 # 필요한 모듈 조건부 가져오기
 try:
@@ -366,6 +367,175 @@ def classify_message_anthropic(client: anthropic.Anthropic, message: str, system
         logger.error(f"Anthropic API 호출 중 오류: {str(e)}")
         return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
 
+# 메시지 분류 함수 (Claude Bedrock)
+def classify_message_claude_bedrock(message: str, system_prompt: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """AWS Bedrock의 Claude 모델을 사용하여 메시지를 분류합니다."""
+    if not BEDROCK_AVAILABLE:
+        return {"error": "AWS Bedrock 모듈이 설치되지 않았습니다."}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+    
+    try:
+        # AWS Bedrock 클라이언트 초기화
+        bedrock_runtime = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=AWS_BEDROCK_SETTINGS["region"],
+            aws_access_key_id=AWS_BEDROCK_SETTINGS["access_key_id"],
+            aws_secret_access_key=AWS_BEDROCK_SETTINGS["access_key"]
+        )
+        
+        # 토큰 사용량 계산 (근사치)
+        input_text = system_prompt + message
+        input_tokens = num_tokens_from_string(input_text)
+        
+        # 요청 본문 구성
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": LLM_SETTINGS["claude-bedrock"]["max_tokens"],
+            "temperature": LLM_SETTINGS["claude-bedrock"]["temperature"],
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": message}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        
+        # API 호출
+        start_time = time.time()
+        response = bedrock_runtime.invoke_model(
+            modelId=AWS_BEDROCK_SETTINGS["model"],
+            body=json.dumps(request_body)
+        )
+        end_time = time.time()
+        
+        # 응답 처리
+        response_body = json.loads(response['body'].read().decode('utf-8'))
+        response_text = response_body.get('content', [{'text': ''}])[0].get('text', '')
+        
+        # 토큰 사용량 추정 (Bedrock은 정확한 토큰 사용량을 제공하지 않을 수 있음)
+        output_tokens = num_tokens_from_string(response_text)
+        
+        # 토큰 비용 계산
+        token_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        token_cost = calculate_token_cost(token_usage, "claude-bedrock")
+        
+        # 프롬프트 히스토리에 추가
+        prompt_history.append({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "model": AWS_BEDROCK_SETTINGS["model"],
+            "provider": "claude-bedrock",
+            "input": message,
+            "system_prompt": system_prompt,
+            "output": response_text,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        })
+        
+        # JSON 파싱
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            logger.warning(f"JSON 파싱 오류: {response_text}")
+            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+        
+        # 토큰 사용량 및 비용 정보 추가
+        usage_info = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        }
+        
+        return result, usage_info
+        
+    except Exception as e:
+        logger.error(f"Claude Bedrock API 호출 중 오류: {str(e)}")
+        return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+
+# 메시지 분류 함수 (ExaOne)
+def classify_message_exaone(message: str, system_prompt: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """ExaOne API를 사용하여 메시지를 분류합니다."""
+    try:
+        # ExaOne API 클라이언트 초기화 (OpenAI 호환 API 사용)
+        client = OpenAI(
+            api_key=EXAONE_SETTINGS["api_key"],
+            base_url=EXAONE_SETTINGS["base_url"]
+        )
+        
+        # 토큰 사용량 계산
+        input_text = system_prompt + message
+        input_tokens = num_tokens_from_string(input_text)
+        
+        # API 호출
+        start_time = time.time()
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message}
+        ]
+        
+        response = client.chat.completions.create(
+            model=EXAONE_SETTINGS["model"],
+            messages=messages,
+            temperature=LLM_SETTINGS["exaone"]["temperature"],
+            max_tokens=LLM_SETTINGS["exaone"]["max_tokens"]
+        )
+        end_time = time.time()
+        
+        # 응답 처리
+        response_text = response.choices[0].message.content
+        
+        # 토큰 사용량 추정 (ExaOne은 정확한 토큰 사용량을 제공하지 않을 수 있음)
+        output_tokens = num_tokens_from_string(response_text)
+        
+        # 토큰 비용 계산
+        token_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        token_cost = calculate_token_cost(token_usage, "exaone")
+        
+        # 프롬프트 히스토리에 추가
+        prompt_history.append({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "model": EXAONE_SETTINGS["model"],
+            "provider": "exaone",
+            "input": message,
+            "system_prompt": system_prompt,
+            "output": response_text,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        })
+        
+        # JSON 파싱
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            logger.warning(f"JSON 파싱 오류: {response_text}")
+            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+        
+        # 토큰 사용량 및 비용 정보 추가
+        usage_info = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"],
+            "response_time": end_time - start_time
+        }
+        
+        return result, usage_info
+        
+    except Exception as e:
+        logger.error(f"ExaOne API 호출 중 오류: {str(e)}")
+        return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+
 # 스팸 분류 실행 함수
 def run_spam_classification(
     file_path: str = None, 
@@ -425,6 +595,10 @@ def run_spam_classification(
             result, token_usage = classify_message_openai(openai_client, message_content, system_prompt)
         elif llm_type == "anthropic" and anthropic_client:
             result, token_usage = classify_message_anthropic(anthropic_client, message_content, system_prompt)
+        elif llm_type == "claude-bedrock" and BEDROCK_AVAILABLE:
+            result, token_usage = classify_message_claude_bedrock(message_content, system_prompt)
+        elif llm_type == "exaone":
+            result, token_usage = classify_message_exaone(message_content, system_prompt)
         else:
             logger.error(f"지원되지 않는 LLM 유형: {llm_type}")
             return {"error": f"지원되지 않는 LLM 유형: {llm_type}"}
