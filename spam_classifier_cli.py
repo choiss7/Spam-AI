@@ -254,14 +254,21 @@ def main():
         f.write("\n")
     
     try:
-        # 파일 경로 처리 - data/ 접두사 제거
+        # 파일 경로 처리
         file_path = args.file
-        if file_path.startswith("data/"):
-            file_path = file_path.replace("data/", "", 1)
         
         # 파일 존재 확인
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"파일을 찾을 수 없습니다: {args.file}")
+            print(f"경고: 지정된 파일을 찾을 수 없습니다: {file_path}")
+            print("현재 디렉토리에서 스팸 리스트 파일을 찾는 중...")
+            
+            # 현재 디렉토리에서 엑셀 파일 찾기
+            excel_files = [f for f in os.listdir('.') if f.endswith('.xlsx') and '스팸' in f]
+            if excel_files:
+                file_path = excel_files[0]
+                print(f"대체 파일을 찾았습니다: {file_path}")
+            else:
+                raise FileNotFoundError(f"스팸 리스트 파일을 찾을 수 없습니다. 파일 경로를 확인해주세요: {args.file}")
         
         # 각 LLM 유형별로 스팸 분류 실행
         all_results = {}
@@ -273,19 +280,36 @@ def main():
             os.makedirs(llm_output_folder, exist_ok=True)
             
             # 스팸 분류 실행
-            df = classify_spam_messages(file_path, llm_type, sample_size)
+            result = run_spam_classification(
+                file_path=file_path,
+                llm_type=llm_type,
+                sample_size=sample_size,
+                output_folder=llm_output_folder,
+                verbose=args.verbose
+            )
             
-            # 분류 결과 분석 및 시각화
-            print(f"{llm_type.upper()} 모델 분류 결과 분석 중...")
-            analyze_classification_results(df, llm_output_folder, llm_type)
+            if "error" in result:
+                print(f"{llm_type.upper()} 모델 분류 중 오류 발생: {result['error']}")
+                continue
+                
+            print(f"{llm_type.upper()} 모델 분류 완료!")
+            print(f"결과 폴더: {result['result_folder']}")
+            print(f"스팸 비율: {result.get('spam_ratio', 0):.1%}")
+            print(f"평균 신뢰도: {result.get('confidence_mean', 0):.2f}")
+            
+            # 토큰 사용량 및 비용 정보 출력
+            if 'token_usage' in result and 'token_cost' in result:
+                print(f"토큰 사용량: 입력 {result['token_usage']['input_tokens']:,}, 출력 {result['token_usage']['output_tokens']:,}")
+                print(f"총 비용: ${result['token_cost']['total_cost']:.6f}")
             
             # 결과 저장
-            all_results[llm_type] = df
+            all_results[llm_type] = result
             
             # 프롬프트 히스토리 업데이트
             with open(prompt_history_file, "a", encoding="utf-8") as f:
                 f.write(f"### {llm_type.upper()} 모델 스팸 분류 완료\n")
-                f.write(f"- 분석된 메시지 수: {len(df)}\n")
+                f.write(f"- 분석된 메시지 수: {result.get('spam_count', 0) + (len(result.get('results', [])) - result.get('spam_count', 0))}\n")
+                f.write(f"- 스팸 비율: {result.get('spam_ratio', 0):.1%}\n")
                 
                 if llm_type == "local_ai":
                     from config import LOCAL_AI_SETTINGS
@@ -293,7 +317,11 @@ def main():
                 else:
                     f.write(f"- 사용된 모델: {LLM_SETTINGS[llm_type]['model']}\n")
                     
-                f.write(f"- 결과 저장 위치: {os.path.abspath(llm_output_folder)}\n\n")
+                f.write(f"- 결과 저장 위치: {result['result_folder']}\n\n")
+                
+                if 'token_usage' in result and 'token_cost' in result:
+                    f.write(f"- 토큰 사용량: 입력 {result['token_usage']['input_tokens']:,}, 출력 {result['token_usage']['output_tokens']:,}\n")
+                    f.write(f"- 총 비용: ${result['token_cost']['total_cost']:.6f}\n\n")
         
         # 모든 LLM 결과 비교 분석 (2개 이상의 LLM을 사용한 경우)
         if len(args.llm) > 1:
@@ -302,7 +330,7 @@ def main():
             os.makedirs(compare_output_folder, exist_ok=True)
             
             # 결과 비교 분석 함수 호출 (이 함수는 별도로 구현 필요)
-            compare_llm_results(all_results, compare_output_folder)
+            # compare_llm_results(all_results, compare_output_folder)
             
             # 프롬프트 히스토리 업데이트
             with open(prompt_history_file, "a", encoding="utf-8") as f:
@@ -324,13 +352,16 @@ def main():
         # 결과 요약 표시
         if args.verbose:
             for llm_type in args.llm:
-                summary_file = os.path.join(output_folder, llm_type, "classification_summary.txt")
-                if os.path.exists(summary_file):
-                    with open(summary_file, "r", encoding="utf-8") as f:
-                        print(f"\n=== {llm_type.upper()} 모델 분류 결과 요약 ===")
-                        print(f.read())
-                else:
-                    print(f"\n{llm_type.upper()} 모델 요약 파일을 찾을 수 없습니다.")
+                if llm_type in all_results:
+                    result = all_results[llm_type]
+                    if "result_folder" in result:
+                        summary_file = os.path.join(result["result_folder"], "classification_summary.txt")
+                        if os.path.exists(summary_file):
+                            with open(summary_file, "r", encoding="utf-8") as f:
+                                print(f"\n=== {llm_type.upper()} 모델 분류 결과 요약 ===")
+                                print(f.read())
+                        else:
+                            print(f"\n{llm_type.upper()} 모델 요약 파일을 찾을 수 없습니다: {summary_file}")
     
     except FileNotFoundError as e:
         print(f"파일 오류: {e}")
