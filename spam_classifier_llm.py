@@ -577,6 +577,14 @@ def run_spam_classification(
             axis=1
         )
         
+        # spam_criteria가 비어있는 경우 explanation에서 가져오기
+        results_df["spam_criteria"] = results_df.apply(
+            lambda row: row["classification"].get("explanation", "") if (row["spam_criteria"] == "" or pd.isna(row["spam_criteria"])) and isinstance(row.get("classification"), dict)
+                   else row.get("result", {}).get("reason", "") if (row["spam_criteria"] == "" or pd.isna(row["spam_criteria"])) and isinstance(row.get("result"), dict)
+                   else row["spam_criteria"],
+            axis=1
+        )
+        
         results_df["confidence"] = results_df.apply(
             lambda row: row["classification"].get("confidence", 0) if isinstance(row.get("classification"), dict) else row.get("result", {}).get("confidence", 0) if isinstance(row.get("result"), dict) else 0,
             axis=1
