@@ -71,6 +71,12 @@ logger = logging.getLogger(__name__)
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
+# 시스템 프롬프트 템플릿 업데이트 (config.py에서 가져온 것을 확장)
+SYSTEM_PROMPT_TEMPLATE = SYSTEM_PROMPT_TEMPLATE.replace(
+    "\"explanation\": \"스팸 판단 이유에 대한 설명\"",
+    "\"explanation\": \"스팸 판단 이유에 대한 설명\", \"spam_criteria\": \"스팸으로 분류한 주요 기준 (예: 피싱, 사기, 광고, 악성링크 등)\""
+)
+
 # 결과 폴더 생성
 def create_results_folder(base_path: str = None) -> str:
     """결과를 저장할 폴더를 생성합니다."""
@@ -435,8 +441,12 @@ def run_spam_classification(
             "id": idx,
             "message": message_content,
             "classification": result,
-            "token_usage": token_usage,
-            "token_cost": token_cost
+            "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
+            "input_tokens": token_usage["input_tokens"],
+            "output_tokens": token_usage["output_tokens"],
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"]
         }
         
         # 원본 데이터의 필드 추가
@@ -502,8 +512,12 @@ def run_spam_classification(
                 "id": row.name,
                 "message": message_content,
                 "classification": result,
-                "token_usage": token_usage,
-                "token_cost": token_cost
+                "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
+                "input_tokens": token_usage["input_tokens"],
+                "output_tokens": token_usage["output_tokens"],
+                "input_cost": token_cost["input_cost"],
+                "output_cost": token_cost["output_cost"],
+                "total_cost": token_cost["total_cost"]
             }
             
             # 원본 데이터의 필드 추가
@@ -529,13 +543,12 @@ def run_spam_classification(
             sample_data = {
                 "id": 0,
                 "message": "샘플 메시지",
-                "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터"},
+                "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터", "spam_criteria": ""},
                 "is_spam": "비스팸",
                 "spam_type": "샘플 데이터",
+                "spam_criteria": "",  # 스팸 분류 기준 추가
                 "confidence": 0.0,
                 "explanation": "샘플 데이터",
-                "token_usage": {"input_tokens": 0, "output_tokens": 0},
-                "token_cost": {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0},
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "input_cost": 0.0,
@@ -558,6 +571,12 @@ def run_spam_classification(
             axis=1
         )
         
+        # spam_criteria 필드 추가
+        results_df["spam_criteria"] = results_df.apply(
+            lambda row: row["classification"].get("spam_criteria", "") if isinstance(row.get("classification"), dict) else row.get("result", {}).get("spam_criteria", "") if isinstance(row.get("result"), dict) else "",
+            axis=1
+        )
+        
         results_df["confidence"] = results_df.apply(
             lambda row: row["classification"].get("confidence", 0) if isinstance(row.get("classification"), dict) else row.get("result", {}).get("confidence", 0) if isinstance(row.get("result"), dict) else 0,
             axis=1
@@ -570,23 +589,23 @@ def run_spam_classification(
         
         # 토큰 사용량 및 비용 추출
         results_df["input_tokens"] = results_df.apply(
-            lambda row: row.get("token_usage", {}).get("input_tokens", 0) if isinstance(row.get("token_usage"), dict) else 0,
+            lambda row: row.get("token_usage", {}).get("input_tokens", 0) if isinstance(row.get("token_usage"), dict) else row.get("input_tokens", 0),
             axis=1
         )
         results_df["output_tokens"] = results_df.apply(
-            lambda row: row.get("token_usage", {}).get("output_tokens", 0) if isinstance(row.get("token_usage"), dict) else 0,
+            lambda row: row.get("token_usage", {}).get("output_tokens", 0) if isinstance(row.get("token_usage"), dict) else row.get("output_tokens", 0),
             axis=1
         )
         results_df["input_cost"] = results_df.apply(
-            lambda row: row.get("token_cost", {}).get("input_cost", 0.0) if isinstance(row.get("token_cost"), dict) else 0.0,
+            lambda row: row.get("token_cost", {}).get("input_cost", 0.0) if isinstance(row.get("token_cost"), dict) else row.get("input_cost", 0.0),
             axis=1
         )
         results_df["output_cost"] = results_df.apply(
-            lambda row: row.get("token_cost", {}).get("output_cost", 0.0) if isinstance(row.get("token_cost"), dict) else 0.0,
+            lambda row: row.get("token_cost", {}).get("output_cost", 0.0) if isinstance(row.get("token_cost"), dict) else row.get("output_cost", 0.0),
             axis=1
         )
         results_df["total_cost"] = results_df.apply(
-            lambda row: row.get("token_cost", {}).get("total_cost", 0.0) if isinstance(row.get("token_cost"), dict) else 0.0,
+            lambda row: row.get("token_cost", {}).get("total_cost", 0.0) if isinstance(row.get("token_cost"), dict) else row.get("total_cost", 0.0),
             axis=1
         )
         
@@ -642,6 +661,15 @@ def run_spam_classification(
             for spam_type, count in spam_types.items():
                 f.write(f"- {spam_type}: {count} ({count/spam_count:.1%})\n")
             f.write("\n")
+            
+            # 스팸 분류 기준 분포 추가
+            if "spam_criteria" in results_df.columns and spam_count > 0:
+                spam_criteria_counts = results_df[results_df["is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]["spam_criteria"].value_counts()
+                f.write("스팸 분류 기준 분포:\n")
+                for criteria, count in spam_criteria_counts.items():
+                    if criteria and criteria.strip():  # 빈 문자열이 아닌 경우에만 출력
+                        f.write(f"- {criteria}: {count} ({count/spam_count:.1%})\n")
+                f.write("\n")
             
             f.write("신뢰도 통계:\n")
             f.write(f"- 평균 신뢰도: {confidence_mean:.2f}\n")
@@ -771,6 +799,23 @@ def run_spam_classification(
             plt.grid(True, linestyle='--', alpha=0.7)
             plt.tight_layout()
             plt.savefig(f"{result_folder}/token_cost_relationship.png")
+            
+            # 스팸 분류 기준 분포 시각화 추가
+            if "spam_criteria" in results_df.columns and spam_count > 0:
+                spam_criteria_counts = results_df[results_df["is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False)]["spam_criteria"].value_counts()
+                
+                # 빈 문자열 제거
+                spam_criteria_counts = spam_criteria_counts[spam_criteria_counts.index.str.strip() != ""]
+                
+                if len(spam_criteria_counts) > 0:
+                    plt.figure(figsize=(12, 6))
+                    spam_criteria_counts.plot(kind='bar')
+                    plt.title('스팸 분류 기준 분포')
+                    plt.xlabel('분류 기준')
+                    plt.ylabel('메시지 수')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    plt.savefig(f"{result_folder}/spam_criteria_distribution.png")
         else:
             logger.warning("비용 정보를 시각화할 데이터가 없습니다.")
         
@@ -807,9 +852,7 @@ def run_spam_classification(
             "result_folder": result_folder,
             "spam_count": int(spam_count),
             "spam_ratio": float(spam_ratio),
-            "confidence_mean": float(confidence_mean),
-            "token_usage": total_token_usage,
-            "token_cost": total_cost
+            "confidence_mean": float(confidence_mean)
         }
         
     except Exception as e:
@@ -842,6 +885,4 @@ if __name__ == "__main__":
     else:
         logger.info(f"분류 완료! 결과 폴더: {result['result_folder']}")
         logger.info(f"스팸 비율: {result['spam_ratio']:.1%}")
-        logger.info(f"평균 신뢰도: {result['confidence_mean']:.2f}")
-        logger.info(f"총 토큰 사용량: 입력 {result['token_usage']['input_tokens']:,}, 출력 {result['token_usage']['output_tokens']:,}")
-        logger.info(f"총 비용: ${result['token_cost']['total_cost']:.6f}") 
+        logger.info(f"평균 신뢰도: {result['confidence_mean']:.2f}") 
