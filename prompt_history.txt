@@ -46,4 +46,11 @@
 - 수정 내용:
   1. 시스템 프롬프트 템플릿에서 reason 필드를 explanation으로 변경
   2. 이를 통해 모든 LLM 모델이 일관된 필드명을 사용하도록 설정
-- 커밋: "시스템 프롬프트의 reason 필드를 explanation으로 변경" 
+- 커밋: "시스템 프롬프트의 reason 필드를 explanation으로 변경"
+
+### 2. 결과 저장 시 explanation 필드 추가
+- 문제: 결과 CSV 파일에 explanation 필드가 공백으로 출력되는 문제 발생
+- 수정 내용:
+  1. 결과 데이터프레임 생성 시 classification 결과에서 explanation 필드를 추출하도록 수정
+  2. 결과 저장 시 모든 row_result에 explanation 필드 직접 추가
+- 커밋: "결과 저장 시 explanation 필드 추가" 
