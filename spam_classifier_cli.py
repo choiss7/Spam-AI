@@ -133,6 +133,8 @@ def run_git_command(command, error_message=None):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True
         )
         return True, result.stdout
