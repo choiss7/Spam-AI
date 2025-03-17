@@ -386,7 +386,7 @@ def classify_message_claude_bedrock(message: str, system_prompt: str) -> Tuple[D
         input_text = system_prompt + message
         input_tokens = num_tokens_from_string(input_text)
         
-        # 요청 본문 구성
+        # 요청 본문 구성 (response_format 제거)
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": LLM_SETTINGS["claude-bedrock"]["max_tokens"],
@@ -394,8 +394,7 @@ def classify_message_claude_bedrock(message: str, system_prompt: str) -> Tuple[D
             "system": system_prompt,
             "messages": [
                 {"role": "user", "content": message}
-            ],
-            "response_format": {"type": "json_object"}
+            ]
         }
         
         # API 호출
@@ -438,7 +437,16 @@ def classify_message_claude_bedrock(message: str, system_prompt: str) -> Tuple[D
             result = json.loads(response_text)
         except json.JSONDecodeError:
             logger.warning(f"JSON 파싱 오류: {response_text}")
-            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+            # JSON 형식이 아닌 경우 텍스트에서 JSON 추출 시도
+            import re
+            json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+            else:
+                result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
         
         # 토큰 사용량 및 비용 정보 추가
         usage_info = {
@@ -517,7 +525,16 @@ def classify_message_exaone(message: str, system_prompt: str) -> Tuple[Dict[str,
             result = json.loads(response_text)
         except json.JSONDecodeError:
             logger.warning(f"JSON 파싱 오류: {response_text}")
-            result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+            # JSON 형식이 아닌 경우 텍스트에서 JSON 추출 시도
+            import re
+            json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
+            else:
+                result = {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}
         
         # 토큰 사용량 및 비용 정보 추가
         usage_info = {
@@ -938,16 +955,30 @@ def run_spam_classification(
                 '출력 토큰 비용': total_cost['output_cost']
             }
             
-            # 파이 차트 생성
-            plt.pie(
-                cost_data.values(), 
-                labels=cost_data.keys(), 
-                autopct='%1.1f%%',
-                startangle=90,
-                colors=['#66b3ff', '#ff9999']
-            )
-            plt.axis('equal')  # 원형 파이 차트를 위해
-            plt.title(f'토큰 비용 분포 (총 ${total_cost["total_cost"]:.4f})')
+            # NaN 값 확인 및 처리
+            has_nan = False
+            for key, value in cost_data.items():
+                if pd.isna(value):
+                    has_nan = True
+                    cost_data[key] = 0.0
+                    logger.warning(f"{key}에 NaN 값이 있어 0으로 대체합니다.")
+            
+            # 모든 값이 0인 경우 처리
+            if all(v == 0 for v in cost_data.values()):
+                plt.text(0.5, 0.5, '비용 데이터가 없습니다', ha='center', va='center', transform=plt.gca().transAxes)
+                plt.title('토큰 비용 분포 (데이터 없음)')
+            else:
+                # 파이 차트 생성
+                plt.pie(
+                    cost_data.values(), 
+                    labels=cost_data.keys(), 
+                    autopct='%1.1f%%',
+                    startangle=90,
+                    colors=['#66b3ff', '#ff9999']
+                )
+                plt.axis('equal')  # 원형 파이 차트를 위해
+                plt.title(f'토큰 비용 분포 (총 ${total_cost["total_cost"]:.4f})')
+            
             plt.tight_layout()
             plt.savefig(f"{result_folder}/token_cost_distribution.png")
             
