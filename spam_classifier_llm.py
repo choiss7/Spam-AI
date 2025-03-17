@@ -371,24 +371,90 @@ def run_spam_classification(
     
     # 결과가 비어있는 경우 샘플 데이터 추가
     if len(results_df) == 0:
-        logger.warning("결과 데이터프레임이 비어있습니다. 샘플 데이터를 추가합니다.")
-        sample_data = {
-            "id": 0,
-            "message": "샘플 메시지",
-            "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터"},
-            "is_spam": "비스팸",
-            "spam_type": "샘플 데이터",
-            "confidence": 0.0,
-            "explanation": "샘플 데이터",
-            "token_usage": {"input_tokens": 0, "output_tokens": 0},
-            "token_cost": {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0},
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "input_cost": 0.0,
-            "output_cost": 0.0,
-            "total_cost": 0.0
-        }
-        results_df = pd.DataFrame([sample_data])
+        logger.warning("결과 데이터프레임이 비어있습니다. 다시 메시지 처리를 시도합니다.")
+        
+        # 원본 데이터에서 처음 몇 개의 메시지 선택
+        retry_count = min(5, len(df))
+        for i in range(retry_count):
+            row = df.iloc[i]
+            
+            # 메시지 내용 추출
+            message_content = ""
+            if "메시지내용" in row:
+                message_content = str(row["메시지내용"])
+            elif "message_content" in row:
+                message_content = str(row["message_content"])
+            elif "content" in row:
+                message_content = str(row["content"])
+            
+            # 빈 메시지 건너뛰기
+            if pd.isna(message_content) or message_content.strip() == "":
+                continue
+            
+            logger.info(f"메시지 재처리 시도 {i+1}/{retry_count}: {message_content[:50]}...")
+            
+            # LLM으로 분류
+            result = {}
+            token_usage = {"input_tokens": 0, "output_tokens": 0}
+            
+            if llm_type == "openai" and openai_client:
+                result, token_usage = classify_message_openai(openai_client, message_content, system_prompt)
+            elif llm_type == "anthropic" and anthropic_client:
+                result, token_usage = classify_message_anthropic(anthropic_client, message_content, system_prompt)
+            
+            # 토큰 사용량 누적
+            total_token_usage["input_tokens"] += token_usage["input_tokens"]
+            total_token_usage["output_tokens"] += token_usage["output_tokens"]
+            
+            # 토큰 비용 계산
+            token_cost = calculate_token_cost(token_usage, llm_type)
+            
+            # 결과 저장
+            row_result = {
+                "id": row.name,
+                "message": message_content,
+                "classification": result,
+                "token_usage": token_usage,
+                "token_cost": token_cost
+            }
+            
+            # 원본 데이터의 필드 추가
+            for col in df.columns:
+                if col != "메시지내용" and col != "message_content" and col != "content":
+                    row_result[col] = row[col]
+            
+            results.append(row_result)
+            
+            # 성공적으로 처리된 경우 중단
+            if isinstance(result, dict) and "is_spam" in result:
+                break
+            
+            # API 호출 간 지연
+            time.sleep(1.0)
+        
+        # 결과 데이터프레임 다시 생성
+        if results:
+            results_df = pd.DataFrame(results)
+        else:
+            # 여전히 결과가 없는 경우 샘플 데이터 추가
+            logger.warning("재시도 후에도 결과가 없습니다. 샘플 데이터를 추가합니다.")
+            sample_data = {
+                "id": 0,
+                "message": "샘플 메시지",
+                "classification": {"is_spam": "비스팸", "spam_type": "샘플 데이터", "confidence": 0.0, "explanation": "샘플 데이터"},
+                "is_spam": "비스팸",
+                "spam_type": "샘플 데이터",
+                "confidence": 0.0,
+                "explanation": "샘플 데이터",
+                "token_usage": {"input_tokens": 0, "output_tokens": 0},
+                "token_cost": {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0},
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "input_cost": 0.0,
+                "output_cost": 0.0,
+                "total_cost": 0.0
+            }
+            results_df = pd.DataFrame([sample_data])
     
     # 분류 결과 추출 및 통계 계산
     try:
