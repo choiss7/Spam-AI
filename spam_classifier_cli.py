@@ -567,7 +567,8 @@ def compare_llm_results(all_results, output_folder):
         # 각 LLM 모델별 스팸 비율
         f.write(f"\n## 각 LLM 모델별 스팸 비율\n")
         for llm_type in all_results.keys():
-            spam_ratio = comparison_df[f"{llm_type}_is_spam"].mean()
+            # "스팸" 문자열 기준으로 비율 계산
+            spam_ratio = (comparison_df[f"{llm_type}_is_spam"] == "스팸").mean()
             f.write(f"- {llm_type.upper()}: {spam_ratio:.2%}\n")
         
         # 휴먼 분류 스팸 비율
