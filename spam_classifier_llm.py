@@ -149,7 +149,17 @@ def classify_with_gpt(client, message_content, system_prompt=None):
             response_format={"type": "json_object"}
         )
         
-        result = json.loads(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        
+        # ```json 접두사 및 ``` 접미사 제거
+        if "```json" in content:
+            # ```json과 ``` 사이의 내용 추출
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif content.startswith("```") and content.endswith("```"):
+            # 일반 코드 블록 처리
+            content = content[3:-3].strip()
+        
+        result = json.loads(content)
         result["model"] = model
         return result
     
@@ -195,7 +205,17 @@ def classify_with_claude(client, message_content, system_prompt=None):
             temperature=temperature
         )
         
-        result = json.loads(response.content[0].text)
+        content = response.content[0].text
+        
+        # ```json 접두사 및 ``` 접미사 제거
+        if "```json" in content:
+            # ```json과 ``` 사이의 내용 추출
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif content.startswith("```") and content.endswith("```"):
+            # 일반 코드 블록 처리
+            content = content[3:-3].strip()
+        
+        result = json.loads(content)
         result["model"] = model
         return result
     
@@ -258,6 +278,14 @@ def classify_with_local_ai(client_settings, message_content, system_prompt=None)
             content = response_data["choices"][0]["message"]["content"]
             
             try:
+                # ```json 접두사 및 ``` 접미사 제거
+                if "```json" in content:
+                    # ```json과 ``` 사이의 내용 추출
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif content.startswith("```") and content.endswith("```"):
+                    # 일반 코드 블록 처리
+                    content = content[3:-3].strip()
+                
                 result = json.loads(content)
                 result["model"] = model
                 return result
@@ -296,7 +324,7 @@ def classify_with_exaone(client_settings, message_content, system_prompt=None):
     ExaOne을 사용하여 메시지를 스팸으로 분류합니다.
     
     Args:
-        client_settings: ExaOne 설정
+        client_settings: ExaOne 클라이언트 설정
         message_content: 분류할 메시지 내용
         system_prompt: 시스템 프롬프트 (기본값: None)
         
@@ -339,6 +367,14 @@ def classify_with_exaone(client_settings, message_content, system_prompt=None):
             content = response_data["choices"][0]["message"]["content"]
             
             try:
+                # ```json 접두사 및 ``` 접미사 제거
+                if "```json" in content:
+                    # ```json과 ``` 사이의 내용 추출
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif content.startswith("```") and content.endswith("```"):
+                    # 일반 코드 블록 처리
+                    content = content[3:-3].strip()
+                
                 result = json.loads(content)
                 result["model"] = model
                 return result
@@ -410,6 +446,14 @@ def classify_with_claude_bedrock(client, message_content, system_prompt=None):
         content = response_body.get("content", [{}])[0].get("text", "")
         
         try:
+            # ```json 접두사 및 ``` 접미사 제거
+            if "```json" in content:
+                # ```json과 ``` 사이의 내용 추출
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif content.startswith("```") and content.endswith("```"):
+                # 일반 코드 블록 처리
+                content = content[3:-3].strip()
+            
             result = json.loads(content)
             result["model"] = model_id
             return result
