@@ -1,11 +1,24 @@
-import pandas as pd
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+스팸 메시지 분류 스크립트
+LLM(GPT, Claude)을 사용하여 스팸 메시지를 분류합니다.
+"""
+
 import os
+import sys
 import json
 import time
-from datetime import datetime
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import requests
+from datetime import datetime
+from typing import Dict, List, Tuple, Any, Optional
+import tiktoken
+import anthropic
+from openai import OpenAI
+import logging
 
 # 필요한 모듈 조건부 가져오기
 try:
@@ -40,730 +53,497 @@ from config import (
     SPAM_CLASSIFICATION_SETTINGS,
     SYSTEM_PROMPT_TEMPLATE,
     FILE_PATHS,
-    DEFAULT_LLM_PROVIDER
+    DEFAULT_LLM_PROVIDER,
+    LLM_PRICING
 )
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # 한글 폰트 설정 (윈도우 환경)
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
 # 결과 폴더 생성
-now = datetime.now()
-result_folder = f"spam_llm_classification_{now.strftime('%Y%m%d_%H%M%S')}"
-os.makedirs(result_folder, exist_ok=True)
+def create_results_folder(base_path: str = None) -> str:
+    """결과를 저장할 폴더를 생성합니다."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if base_path is None:
+        base_path = FILE_PATHS.get("output_folder", "./spam_llm_classification")
+    
+    result_folder = f"{base_path}_{timestamp}"
+    os.makedirs(result_folder, exist_ok=True)
+    return result_folder
 
-# 프롬프트 히스토리 파일 생성 및 초기화
-prompt_history_file = os.path.join(result_folder, "prompt_history.txt")
-with open(prompt_history_file, "w", encoding="utf-8") as f:
-    f.write("# 스팸 리스트 LLM 분류 프롬프트 히스토리\n\n")
-    f.write(f"## 분석 시작 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-    f.write("### 프롬프트: 스팸리스트 파일을 LLM(클로드, GPT)과 같은 NLP 기반의 분류를 하기 위한 소스 코드 작성\n\n")
+# 프롬프트 히스토리 초기화
+prompt_history = []
 
-# LLM 클라이언트 초기화 함수
-def initialize_llm_clients():
+# OpenAI 토큰 카운터 초기화
+def num_tokens_from_string(string: str, model: str = "gpt-4") -> int:
+    """주어진 문자열의 토큰 수를 계산합니다."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        num_tokens = len(encoding.encode(string))
+        return num_tokens
+    except Exception as e:
+        logger.warning(f"토큰 계산 중 오류 발생: {e}")
+        # 대략적인 토큰 수 추정 (영어 기준 1토큰 = 4자, 한글 기준 1토큰 = 1.5자 정도로 가정)
+        return len(string) // 3
+
+# 토큰 비용 계산 함수
+def calculate_token_cost(token_usage: Dict[str, int], llm_type: str) -> Dict[str, float]:
+    """토큰 사용량에 따른 비용을 계산합니다."""
+    if llm_type not in LLM_PRICING:
+        return {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+    
+    pricing = LLM_PRICING[llm_type]
+    input_cost = (token_usage.get("input_tokens", 0) / 1_000_000) * pricing["input"]
+    output_cost = (token_usage.get("output_tokens", 0) / 1_000_000) * pricing["output"]
+    total_cost = input_cost + output_cost
+    
+    return {
+        "input_cost": input_cost,
+        "output_cost": output_cost,
+        "total_cost": total_cost
+    }
+
+# LLM 클라이언트 초기화
+def init_llm_clients() -> Tuple[Optional[OpenAI], Optional[anthropic.Anthropic]]:
     """LLM API 클라이언트를 초기화합니다."""
-    clients = {}
+    openai_client = None
+    anthropic_client = None
     
-    # OpenAI 클라이언트 초기화
-    if OPENAI_AVAILABLE and OPENAI_API_KEY:
+    if OPENAI_API_KEY:
         try:
-            clients["openai"] = OpenAI(api_key=OPENAI_API_KEY)
-            print("OpenAI 클라이언트가 초기화되었습니다.")
+            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            logger.info("OpenAI 클라이언트가 초기화되었습니다.")
         except Exception as e:
-            print(f"OpenAI 클라이언트 초기화 실패: {e}")
-    else:
-        print("OpenAI API 키가 설정되지 않았거나 모듈이 설치되지 않았습니다.")
+            logger.error(f"OpenAI 클라이언트 초기화 중 오류: {e}")
     
-    # Anthropic 클라이언트 초기화
-    if ANTHROPIC_AVAILABLE and ANTHROPIC_API_KEY:
+    if ANTHROPIC_API_KEY:
         try:
-            clients["anthropic"] = Anthropic(api_key=ANTHROPIC_API_KEY)
-            print("Anthropic 클라이언트가 초기화되었습니다.")
+            anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            logger.info("Anthropic 클라이언트가 초기화되었습니다.")
         except Exception as e:
-            print(f"Anthropic 클라이언트 초기화 실패: {e}")
-    else:
-        print("Anthropic API 키가 설정되지 않았거나 모듈이 설치되지 않았습니다.")
+            logger.error(f"Anthropic 클라이언트 초기화 중 오류: {e}")
     
-    # AWS Bedrock 클라이언트 초기화 (Claude Sonnet 3.5 사용)
-    if BEDROCK_AVAILABLE and AWS_BEDROCK_SETTINGS["access_key_id"] and AWS_BEDROCK_SETTINGS["access_key"]:
-        try:
-            bedrock_runtime = boto3.client(
-                service_name="bedrock-runtime",
-                region_name=AWS_BEDROCK_SETTINGS["region"],
-                aws_access_key_id=AWS_BEDROCK_SETTINGS["access_key_id"],
-                aws_secret_access_key=AWS_BEDROCK_SETTINGS["access_key"]
-            )
-            clients["claude-bedrock"] = bedrock_runtime
-            print("AWS Bedrock 클라이언트가 초기화되었습니다. (Claude Sonnet 3.5)")
-        except Exception as e:
-            print(f"AWS Bedrock 클라이언트 초기화 실패: {e}")
-    else:
-        print("AWS Bedrock 자격 증명이 설정되지 않았거나 모듈이 설치되지 않았습니다.")
-    
-    # Local AI 설정
-    clients["local_ai"] = {
-        "base_url": LOCAL_AI_SETTINGS["base_url"],
-        "api_key": LOCAL_AI_SETTINGS["api_key"]
-    }
-    print("Local AI 설정이 초기화되었습니다.")
-    
-    # ExaOne 설정
-    clients["exaone"] = {
-        "base_url": EXAONE_SETTINGS["base_url"],
-        "api_key": EXAONE_SETTINGS["api_key"]
-    }
-    print("ExaOne 설정이 초기화되었습니다.")
-    
-    return clients
+    return openai_client, anthropic_client
 
-# OpenAI GPT를 사용한 스팸 분류 함수
-def classify_with_gpt(client, message_content, system_prompt=None):
-    """
-    OpenAI GPT를 사용하여 메시지를 스팸으로 분류합니다.
-    
-    Args:
-        client: OpenAI 클라이언트
-        message_content: 분류할 메시지 내용
-        system_prompt: 시스템 프롬프트 (기본값: None)
-        
-    Returns:
-        분류 결과 딕셔너리
-    """
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE
+# 메시지 분류 함수 (OpenAI)
+def classify_message_openai(client: OpenAI, message: str, system_prompt: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """OpenAI API를 사용하여 메시지를 분류합니다."""
+    if not client:
+        return {"error": "OpenAI 클라이언트가 초기화되지 않았습니다."}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
     
     try:
-        # 설정에서 모델 및 파라미터 가져오기
-        model = LLM_SETTINGS["openai"]["model"]
-        max_tokens = LLM_SETTINGS["openai"]["max_tokens"]
-        temperature = LLM_SETTINGS["openai"]["temperature"]
+        # 시스템 프롬프트와 사용자 메시지 준비
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message}
+        ]
         
+        # 토큰 사용량 계산
+        input_text = system_prompt + message
+        input_tokens = num_tokens_from_string(input_text, LLM_SETTINGS["openai"]["model"])
+        
+        # API 호출
+        start_time = time.time()
         response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message_content}
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature,
+            model=LLM_SETTINGS["openai"]["model"],
+            messages=messages,
+            temperature=LLM_SETTINGS["openai"]["temperature"],
+            max_tokens=LLM_SETTINGS["openai"]["max_tokens"],
             response_format={"type": "json_object"}
         )
+        end_time = time.time()
         
-        content = response.choices[0].message.content
+        # 응답 처리
+        response_text = response.choices[0].message.content
+        output_tokens = response.usage.completion_tokens
         
-        # ```json 접두사 및 ``` 접미사 제거
-        if "```json" in content:
-            # ```json과 ``` 사이의 내용 추출
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif content.startswith("```") and content.endswith("```"):
-            # 일반 코드 블록 처리
-            content = content[3:-3].strip()
+        # 토큰 비용 계산
+        token_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        token_cost = calculate_token_cost(token_usage, "openai")
         
-        result = json.loads(content)
-        result["model"] = model
-        return result
-    
-    except Exception as e:
-        print(f"GPT 분류 오류: {e}")
-        return {
-            "is_spam": None,
-            "category": None,
-            "confidence": 0,
-            "reason": f"오류 발생: {str(e)}",
-            "model": LLM_SETTINGS["openai"]["model"]
-        }
-
-# Anthropic Claude를 사용한 스팸 분류 함수
-def classify_with_claude(client, message_content, system_prompt=None):
-    """
-    Anthropic Claude를 사용하여 메시지를 스팸으로 분류합니다.
-    
-    Args:
-        client: Anthropic 클라이언트
-        message_content: 분류할 메시지 내용
-        system_prompt: 시스템 프롬프트 (기본값: None)
+        # 프롬프트 히스토리에 추가
+        prompt_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "model": LLM_SETTINGS["openai"]["model"],
+            "system_prompt": system_prompt,
+            "user_message": message,
+            "response": response_text,
+            "processing_time": end_time - start_time,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"]
+        })
         
-    Returns:
-        분류 결과 딕셔너리
-    """
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE
-    
-    try:
-        # 설정에서 모델 및 파라미터 가져오기
-        model = LLM_SETTINGS["anthropic"]["model"]
-        max_tokens = LLM_SETTINGS["anthropic"]["max_tokens"]
-        temperature = LLM_SETTINGS["anthropic"]["temperature"]
-        
-        response = client.messages.create(
-            model=model,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": message_content}
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-        
-        content = response.content[0].text
-        
-        # ```json 접두사 및 ``` 접미사 제거
-        if "```json" in content:
-            # ```json과 ``` 사이의 내용 추출
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif content.startswith("```") and content.endswith("```"):
-            # 일반 코드 블록 처리
-            content = content[3:-3].strip()
-        
-        result = json.loads(content)
-        result["model"] = model
-        return result
-    
-    except Exception as e:
-        print(f"Claude 분류 오류: {e}")
-        return {
-            "is_spam": None,
-            "category": None,
-            "confidence": 0,
-            "reason": f"오류 발생: {str(e)}",
-            "model": LLM_SETTINGS["anthropic"]["model"]
-        }
-
-# Local AI를 사용한 스팸 분류 함수
-def classify_with_local_ai(client_settings, message_content, system_prompt=None):
-    """
-    Local AI를 사용하여 메시지를 스팸으로 분류합니다.
-    
-    Args:
-        client_settings: Local AI 설정
-        message_content: 분류할 메시지 내용
-        system_prompt: 시스템 프롬프트 (기본값: None)
-        
-    Returns:
-        분류 결과 딕셔너리
-    """
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE
-    
-    try:
-        base_url = client_settings["base_url"]
-        api_key = client_settings["api_key"]
-        model = LLM_SETTINGS["local_ai"]["model"]
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message_content}
-            ],
-            "temperature": LLM_SETTINGS["local_ai"]["temperature"],
-            "max_tokens": LLM_SETTINGS["local_ai"]["max_tokens"]
-        }
-        
-        response = requests.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json=data
-        )
-        
-        if response.status_code == 200:
-            response_data = response.json()
-            content = response_data["choices"][0]["message"]["content"]
-            
-            try:
-                # ```json 접두사 및 ``` 접미사 제거
-                if "```json" in content:
-                    # ```json과 ``` 사이의 내용 추출
-                    content = content.split("```json")[1].split("```")[0].strip()
-                elif content.startswith("```") and content.endswith("```"):
-                    # 일반 코드 블록 처리
-                    content = content[3:-3].strip()
-                
-                result = json.loads(content)
-                result["model"] = model
-                return result
-            except json.JSONDecodeError:
-                print(f"JSON 파싱 오류: {content}")
-                return {
-                    "is_spam": None,
-                    "category": None,
-                    "confidence": 0,
-                    "reason": "JSON 파싱 오류",
-                    "model": model
-                }
-        else:
-            print(f"Local AI API 오류: {response.status_code} - {response.text}")
-            return {
-                "is_spam": None,
-                "category": None,
-                "confidence": 0,
-                "reason": f"API 오류: {response.status_code}",
-                "model": model
-            }
-    
-    except Exception as e:
-        print(f"Local AI 분류 오류: {e}")
-        return {
-            "is_spam": None,
-            "category": None,
-            "confidence": 0,
-            "reason": f"오류 발생: {str(e)}",
-            "model": LLM_SETTINGS["local_ai"]["model"]
-        }
-
-# ExaOne을 사용한 스팸 분류 함수
-def classify_with_exaone(client_settings, message_content, system_prompt=None):
-    """
-    ExaOne을 사용하여 메시지를 스팸으로 분류합니다.
-    
-    Args:
-        client_settings: ExaOne 클라이언트 설정
-        message_content: 분류할 메시지 내용
-        system_prompt: 시스템 프롬프트 (기본값: None)
-        
-    Returns:
-        분류 결과 딕셔너리
-    """
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE
-    
-    try:
-        base_url = client_settings["base_url"]
-        api_key = client_settings["api_key"]
-        model = LLM_SETTINGS["exaone"]["model"]
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message_content}
-            ],
-            "temperature": LLM_SETTINGS["exaone"]["temperature"],
-            "max_tokens": LLM_SETTINGS["exaone"]["max_tokens"]
-        }
-        
-        response = requests.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json=data
-        )
-        
-        if response.status_code == 200:
-            response_data = response.json()
-            content = response_data["choices"][0]["message"]["content"]
-            
-            try:
-                # ```json 접두사 및 ``` 접미사 제거
-                if "```json" in content:
-                    # ```json과 ``` 사이의 내용 추출
-                    content = content.split("```json")[1].split("```")[0].strip()
-                elif content.startswith("```") and content.endswith("```"):
-                    # 일반 코드 블록 처리
-                    content = content[3:-3].strip()
-                
-                result = json.loads(content)
-                result["model"] = model
-                return result
-            except json.JSONDecodeError:
-                print(f"JSON 파싱 오류: {content}")
-                return {
-                    "is_spam": None,
-                    "category": None,
-                    "confidence": 0,
-                    "reason": "JSON 파싱 오류",
-                    "model": model
-                }
-        else:
-            print(f"ExaOne API 오류: {response.status_code} - {response.text}")
-            return {
-                "is_spam": None,
-                "category": None,
-                "confidence": 0,
-                "reason": f"API 오류: {response.status_code}",
-                "model": model
-            }
-    
-    except Exception as e:
-        print(f"ExaOne 분류 오류: {e}")
-        return {
-            "is_spam": None,
-            "category": None,
-            "confidence": 0,
-            "reason": f"오류 발생: {str(e)}",
-            "model": LLM_SETTINGS["exaone"]["model"]
-        }
-
-# AWS Bedrock을 통한 Claude Sonnet 3.5 사용 함수
-def classify_with_claude_bedrock(client, message_content, system_prompt=None):
-    """
-    AWS Bedrock을 통해 Claude Sonnet 3.5를 사용하여 메시지를 스팸으로 분류합니다.
-    
-    Args:
-        client: AWS Bedrock 클라이언트
-        message_content: 분류할 메시지 내용
-        system_prompt: 시스템 프롬프트 (기본값: None)
-        
-    Returns:
-        분류 결과 딕셔너리
-    """
-    if system_prompt is None:
-        system_prompt = SYSTEM_PROMPT_TEMPLATE
-    
-    try:
-        model_id = AWS_BEDROCK_SETTINGS["model"]
-        
-        # Claude 모델 형식
-        request_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": LLM_SETTINGS["claude-bedrock"]["max_tokens"],
-            "temperature": LLM_SETTINGS["claude-bedrock"]["temperature"],
-            "system": system_prompt,
-            "messages": [
-                {"role": "user", "content": message_content}
-            ]
-        }
-        
-        response = client.invoke_model(
-            modelId=model_id,
-            body=json.dumps(request_body)
-        )
-        
-        response_body = json.loads(response.get("body").read())
-        content = response_body.get("content", [{}])[0].get("text", "")
-        
+        # JSON 파싱
         try:
-            # ```json 접두사 및 ``` 접미사 제거
-            if "```json" in content:
-                # ```json과 ``` 사이의 내용 추출
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```") and content.endswith("```"):
-                # 일반 코드 블록 처리
-                content = content[3:-3].strip()
-            
-            result = json.loads(content)
-            result["model"] = model_id
-            return result
+            result = json.loads(response_text)
+            return result, {**token_usage, **token_cost}
         except json.JSONDecodeError:
-            print(f"JSON 파싱 오류: {content}")
-            return {
-                "is_spam": None,
-                "category": None,
-                "confidence": 0,
-                "reason": "JSON 파싱 오류",
-                "model": model_id
-            }
-    
+            logger.error(f"JSON 파싱 오류: {response_text}")
+            return {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}, {**token_usage, **token_cost}
+            
     except Exception as e:
-        print(f"Claude Bedrock 분류 오류: {e}")
-        return {
-            "is_spam": None,
-            "category": None,
-            "confidence": 0,
-            "reason": f"오류 발생: {str(e)}",
-            "model": AWS_BEDROCK_SETTINGS["model"]
-        }
+        logger.error(f"OpenAI API 호출 중 오류: {e}")
+        return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+
+# 메시지 분류 함수 (Anthropic)
+def classify_message_anthropic(client: anthropic.Anthropic, message: str, system_prompt: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Anthropic API를 사용하여 메시지를 분류합니다."""
+    if not client:
+        return {"error": "Anthropic 클라이언트가 초기화되지 않았습니다."}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
+    
+    try:
+        # 토큰 사용량 계산
+        input_text = system_prompt + message
+        input_tokens = num_tokens_from_string(input_text)  # Anthropic 토큰 계산은 근사치
+        
+        # API 호출
+        start_time = time.time()
+        response = client.messages.create(
+            model=LLM_SETTINGS["anthropic"]["model"],
+            system=system_prompt,
+            messages=[{"role": "user", "content": message}],
+            temperature=LLM_SETTINGS["anthropic"]["temperature"],
+            max_tokens=LLM_SETTINGS["anthropic"]["max_tokens"],
+            response_format={"type": "json_object"}
+        )
+        end_time = time.time()
+        
+        # 응답 처리
+        response_text = response.content[0].text
+        output_tokens = response.usage.output_tokens
+        input_tokens = response.usage.input_tokens  # 실제 사용된 입력 토큰으로 업데이트
+        
+        # 토큰 비용 계산
+        token_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        token_cost = calculate_token_cost(token_usage, "anthropic")
+        
+        # 프롬프트 히스토리에 추가
+        prompt_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "model": LLM_SETTINGS["anthropic"]["model"],
+            "system_prompt": system_prompt,
+            "user_message": message,
+            "response": response_text,
+            "processing_time": end_time - start_time,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "input_cost": token_cost["input_cost"],
+            "output_cost": token_cost["output_cost"],
+            "total_cost": token_cost["total_cost"]
+        })
+        
+        # JSON 파싱
+        try:
+            result = json.loads(response_text)
+            return result, {**token_usage, **token_cost}
+        except json.JSONDecodeError:
+            logger.error(f"JSON 파싱 오류: {response_text}")
+            return {"error": "응답을 JSON으로 파싱할 수 없습니다.", "raw_response": response_text}, {**token_usage, **token_cost}
+            
+    except Exception as e:
+        logger.error(f"Anthropic API 호출 중 오류: {e}")
+        return {"error": str(e)}, {"input_tokens": 0, "output_tokens": 0, "input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
 
 # 스팸 분류 실행 함수
-def classify_spam_messages(file_path, llm_type=None, sample_size=None):
-    """
-    엑셀 파일에서 메시지를 읽고 LLM을 사용하여 스팸을 분류합니다.
+def run_spam_classification(
+    file_path: str = None, 
+    llm_type: str = "openai", 
+    sample_size: int = None,
+    output_folder: str = None,
+    verbose: bool = False
+) -> Dict[str, Any]:
+    """스팸 메시지 분류를 실행합니다."""
+    # 파일 경로 설정
+    if file_path is None:
+        file_path = FILE_PATHS.get("spam_list_file", "./data/spam_list.xlsx")
     
-    Args:
-        file_path: 스팸 리스트 엑셀 파일 경로
-        llm_type: 사용할 LLM 유형 ('openai', 'anthropic', 'claude-bedrock', 'local_ai', 'exaone')
-        sample_size: 샘플 크기 (None인 경우 전체 데이터 사용)
-        
-    Returns:
-        분류 결과가 추가된 데이터프레임
-    """
-    # 기본값 설정
-    if llm_type is None:
-        llm_type = SPAM_CLASSIFICATION_SETTINGS["default_llm_type"]
-    
-    if sample_size is None:
-        sample_size = SPAM_CLASSIFICATION_SETTINGS["default_sample_size"]
-    
-    print(f"파일 '{file_path}' 읽는 중...")
-    
-    # 엑셀 파일 읽기
-    df = pd.read_excel(file_path)
-    print(f"데이터 크기: {df.shape}")
-    
-    # 샘플링 (필요한 경우)
-    if sample_size is not None and sample_size > 0 and sample_size < len(df):
-        df = df.sample(sample_size, random_state=42)
-        print(f"샘플 크기: {df.shape}")
+    # 결과 폴더 생성
+    result_folder = create_results_folder(output_folder)
+    logger.info(f"결과 폴더가 생성되었습니다: {result_folder}")
     
     # LLM 클라이언트 초기화
-    clients = initialize_llm_clients()
+    openai_client, anthropic_client = init_llm_clients()
     
-    if llm_type not in clients:
-        raise ValueError(f"지원되지 않는 LLM 유형 또는 API 키가 설정되지 않음: {llm_type}")
-    
-    # 결과 저장을 위한 열 추가
-    df["llm_is_spam"] = None
-    df["llm_category"] = None
-    df["llm_confidence"] = None
-    
-    # llm_reason을 모델별 필드로 변경
-    if llm_type == "openai":
-        df["gpt_reason"] = None
-    elif llm_type == "anthropic":
-        df["claude_reason"] = None
-        df["exaone_reason"] = None
-    elif llm_type == "claude-bedrock":
-        df["claude_reason"] = None
-    elif llm_type == "exaone":
-        df["exaone_reason"] = None
-    else:  # local_ai
-        df["local_ai_reason"] = None
+    # 데이터 로드
+    try:
+        df = pd.read_excel(file_path)
+        logger.info(f"데이터가 로드되었습니다. 행 수: {len(df)}")
         
-    df["llm_model"] = None
+        # 샘플 크기 설정
+        if sample_size is not None and sample_size > 0 and sample_size < len(df):
+            df = df.sample(sample_size, random_state=42)
+            logger.info(f"샘플 {sample_size}개가 선택되었습니다.")
+    except Exception as e:
+        logger.error(f"데이터 로드 중 오류: {e}")
+        return {"error": f"데이터 로드 중 오류: {e}"}
     
-    # 분류 함수 선택
-    if llm_type == "openai":
-        classify_func = lambda msg: classify_with_gpt(clients["openai"], msg)
-    elif llm_type == "anthropic":
-        classify_func = lambda msg: classify_with_claude(clients["anthropic"], msg)
-    elif llm_type == "claude-bedrock":
-        classify_func = lambda msg: classify_with_claude_bedrock(clients["claude-bedrock"], msg)
-    elif llm_type == "exaone":
-        classify_func = lambda msg: classify_with_exaone(clients["exaone"], msg)
-    else:  # local_ai
-        classify_func = lambda msg: classify_with_local_ai(clients["local_ai"], msg)
+    # 시스템 프롬프트 설정
+    system_prompt = SYSTEM_PROMPT_TEMPLATE
+    
+    # 결과 저장용 리스트
+    results = []
+    total_token_usage = {"input_tokens": 0, "output_tokens": 0}
     
     # 각 메시지 분류
-    total = len(df)
-    for idx, (i, row) in enumerate(df.iterrows()):
-        print(f"메시지 분류 중... {idx+1}/{total}")
-        
+    for idx, row in df.iterrows():
         # 메시지 내용 추출
-        try:
-            message = str(row["내용"]) if pd.notna(row["내용"]) else ""
-            if not message:
-                print(f"경고: 메시지 {idx+1}의 내용이 비어 있습니다.")
-                df.at[i, "llm_is_spam"] = "비스팸"
-                df.at[i, "llm_category"] = "분류 불가"
-                df.at[i, "llm_confidence"] = 0.0
-                
-                # 모델별 reason 필드 설정
-                if llm_type == "openai":
-                    df.at[i, "gpt_reason"] = "메시지 내용이 비어 있습니다."
-                elif llm_type == "anthropic":
-                    df.at[i, "claude_reason"] = "메시지 내용이 비어 있습니다."
-                    df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
-                elif llm_type == "claude-bedrock":
-                    df.at[i, "claude_reason"] = "메시지 내용이 비어 있습니다."
-                elif llm_type == "exaone":
-                    df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
-                else:
-                    df.at[i, "local_ai_reason"] = "메시지 내용이 비어 있습니다."
-                    
-                df.at[i, "llm_model"] = LLM_SETTINGS[llm_type]["model"]
-                continue
-        except KeyError:
-            print(f"경고: '내용' 열을 찾을 수 없습니다. 데이터프레임 열: {df.columns.tolist()}")
-            raise ValueError("데이터프레임에 '내용' 열이 없습니다. 파일 형식을 확인하세요.")
+        message_content = ""
+        if "메시지내용" in row:
+            message_content = str(row["메시지내용"])
+        elif "message_content" in row:
+            message_content = str(row["message_content"])
+        elif "content" in row:
+            message_content = str(row["content"])
+        
+        # 빈 메시지 처리
+        if pd.isna(message_content) or message_content.strip() == "":
+            logger.warning(f"행 {idx}에 빈 메시지가 있습니다. 건너뜁니다.")
+            continue
+        
+        # 진행 상황 출력
+        if verbose:
+            logger.info(f"메시지 {idx+1}/{len(df)} 분류 중...")
+        else:
+            if (idx + 1) % 10 == 0 or idx + 1 == len(df):
+                logger.info(f"진행 상황: {idx+1}/{len(df)} ({((idx+1)/len(df))*100:.1f}%)")
         
         # LLM으로 분류
-        result = classify_func(message)
+        result = {}
+        token_usage = {"input_tokens": 0, "output_tokens": 0}
+        
+        if llm_type == "openai" and openai_client:
+            result, token_usage = classify_message_openai(openai_client, message_content, system_prompt)
+        elif llm_type == "anthropic" and anthropic_client:
+            result, token_usage = classify_message_anthropic(anthropic_client, message_content, system_prompt)
+        else:
+            logger.error(f"지원되지 않는 LLM 유형: {llm_type}")
+            return {"error": f"지원되지 않는 LLM 유형: {llm_type}"}
+        
+        # 토큰 사용량 누적
+        total_token_usage["input_tokens"] += token_usage["input_tokens"]
+        total_token_usage["output_tokens"] += token_usage["output_tokens"]
+        
+        # 토큰 비용 계산
+        token_cost = calculate_token_cost(token_usage, llm_type)
         
         # 결과 저장
-        df.at[i, "llm_is_spam"] = result.get("is_spam")
-        df.at[i, "llm_category"] = result.get("category")
-        df.at[i, "llm_confidence"] = result.get("confidence")
+        row_result = {
+            "id": idx,
+            "message": message_content,
+            "classification": result,
+            "token_usage": token_usage,
+            "token_cost": token_cost
+        }
         
-        # 모델별 reason 필드 설정
-        if llm_type == "openai":
-            df.at[i, "gpt_reason"] = result.get("reason")
-        elif llm_type == "anthropic":
-            df.at[i, "claude_reason"] = result.get("reason")
-            df.at[i, "exaone_reason"] = result.get("reason")
-        elif llm_type == "claude-bedrock":
-            df.at[i, "claude_reason"] = result.get("reason")
-        elif llm_type == "exaone":
-            df.at[i, "exaone_reason"] = result.get("reason")
-        else:
-            df.at[i, "local_ai_reason"] = result.get("reason")
+        # 원본 데이터의 필드 추가
+        for col in df.columns:
+            if col != "메시지내용" and col != "message_content" and col != "content":
+                row_result[col] = row[col]
+        
+        results.append(row_result)
+        
+        # API 호출 간 지연
+        time.sleep(0.5)
+    
+    # 총 토큰 비용 계산
+    total_cost = calculate_token_cost(total_token_usage, llm_type)
+    
+    # 결과 데이터프레임 생성
+    results_df = pd.DataFrame(results)
+    
+    # 분류 결과 추출 및 통계 계산
+    try:
+        # 분류 결과 추출
+        results_df["is_spam"] = results_df["classification"].apply(
+            lambda x: x.get("is_spam", "알 수 없음") if isinstance(x, dict) else "알 수 없음"
+        )
+        results_df["spam_type"] = results_df["classification"].apply(
+            lambda x: x.get("spam_type", "알 수 없음") if isinstance(x, dict) else "알 수 없음"
+        )
+        results_df["confidence"] = results_df["classification"].apply(
+            lambda x: x.get("confidence", 0) if isinstance(x, dict) else 0
+        )
+        results_df["explanation"] = results_df["classification"].apply(
+            lambda x: x.get("explanation", "") if isinstance(x, dict) else ""
+        )
+        
+        # 토큰 사용량 및 비용 추출
+        results_df["input_tokens"] = results_df["token_usage"].apply(lambda x: x.get("input_tokens", 0))
+        results_df["output_tokens"] = results_df["token_usage"].apply(lambda x: x.get("output_tokens", 0))
+        results_df["input_cost"] = results_df["token_cost"].apply(lambda x: x.get("input_cost", 0.0))
+        results_df["output_cost"] = results_df["token_cost"].apply(lambda x: x.get("output_cost", 0.0))
+        results_df["total_cost"] = results_df["token_cost"].apply(lambda x: x.get("total_cost", 0.0))
+        
+        # 스팸 통계 계산
+        spam_count = results_df["is_spam"].apply(lambda x: "스팸" in x).sum()
+        spam_ratio = spam_count / len(results_df) if len(results_df) > 0 else 0
+        
+        # 스팸 유형 분포
+        spam_types = results_df[results_df["is_spam"].str.contains("스팸")]["spam_type"].value_counts()
+        
+        # 신뢰도 통계
+        confidence_mean = results_df["confidence"].mean()
+        confidence_std = results_df["confidence"].std()
+        
+        # 결과 저장
+        results_df.to_csv(f"{result_folder}/classification_results.csv", index=False, encoding="utf-8-sig")
+        
+        # 프롬프트 히스토리 저장
+        with open(f"{result_folder}/prompt_history.txt", "w", encoding="utf-8") as f:
+            for prompt in prompt_history:
+                f.write(f"시간: {prompt['timestamp']}\n")
+                f.write(f"모델: {prompt['model']}\n")
+                f.write(f"시스템 프롬프트: {prompt['system_prompt']}\n")
+                f.write(f"사용자 메시지: {prompt['user_message']}\n")
+                f.write(f"응답: {prompt['response']}\n")
+                f.write(f"처리 시간: {prompt['processing_time']:.2f}초\n")
+                f.write(f"입력 토큰: {prompt['input_tokens']}\n")
+                f.write(f"출력 토큰: {prompt['output_tokens']}\n")
+                
+                # 토큰 비용 정보 추가
+                if 'input_cost' in prompt and 'output_cost' in prompt and 'total_cost' in prompt:
+                    f.write(f"입력 토큰 비용: ${prompt['input_cost']:.6f}\n")
+                    f.write(f"출력 토큰 비용: ${prompt['output_cost']:.6f}\n")
+                    f.write(f"총 비용: ${prompt['total_cost']:.6f}\n")
+                
+                f.write("-" * 80 + "\n")
+        
+        # 분류 요약 저장
+        with open(f"{result_folder}/classification_summary.txt", "w", encoding="utf-8") as f:
+            f.write("스팸 분류 요약\n")
+            f.write("=" * 50 + "\n\n")
+            f.write(f"분석 날짜: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"데이터 파일: {file_path}\n")
+            f.write(f"샘플 크기: {len(results_df)}\n")
+            f.write(f"LLM 유형: {llm_type}\n")
+            f.write(f"LLM 모델: {LLM_SETTINGS[llm_type]['model']}\n\n")
             
-        df.at[i, "llm_model"] = result.get("model")
+            f.write("스팸 통계:\n")
+            f.write(f"- 스팸 메시지 수: {spam_count} ({spam_ratio:.1%})\n")
+            f.write(f"- 비스팸 메시지 수: {len(results_df) - spam_count} ({1-spam_ratio:.1%})\n\n")
+            
+            f.write("스팸 유형 분포:\n")
+            for spam_type, count in spam_types.items():
+                f.write(f"- {spam_type}: {count} ({count/spam_count:.1%})\n")
+            f.write("\n")
+            
+            f.write("신뢰도 통계:\n")
+            f.write(f"- 평균 신뢰도: {confidence_mean:.2f}\n")
+            f.write(f"- 신뢰도 표준편차: {confidence_std:.2f}\n\n")
+            
+            f.write("토큰 사용량 및 비용:\n")
+            f.write(f"- 총 입력 토큰: {total_token_usage['input_tokens']:,}\n")
+            f.write(f"- 총 출력 토큰: {total_token_usage['output_tokens']:,}\n")
+            f.write(f"- 총 토큰: {total_token_usage['input_tokens'] + total_token_usage['output_tokens']:,}\n")
+            f.write(f"- 입력 토큰 비용: ${total_cost['input_cost']:.6f}\n")
+            f.write(f"- 출력 토큰 비용: ${total_cost['output_cost']:.6f}\n")
+            f.write(f"- 총 비용: ${total_cost['total_cost']:.6f}\n")
+            f.write(f"- 메시지당 평균 비용: ${total_cost['total_cost']/len(results_df) if len(results_df) > 0 else 0:.6f}\n\n")
+            
+            f.write("참고: 비용은 USD 기준이며, 실제 비용은 API 제공업체의 가격 정책에 따라 다를 수 있습니다.\n")
         
-        # API 호출 제한을 위한 대기 시간
-        time.sleep(SPAM_CLASSIFICATION_SETTINGS["api_call_delay"])
-    
-    return df
-
-# 분류 결과 분석 및 시각화 함수
-def analyze_classification_results(df, result_folder, llm_type=None):
-    """
-    분류 결과를 분석하고 시각화합니다.
-    
-    Args:
-        df: 분류 결과가 포함된 데이터프레임
-        result_folder: 결과를 저장할 폴더 경로
-        llm_type: 사용된 LLM 유형 (openai, anthropic, claude-bedrock, local_ai, exaone)
-    """
-    # 결과 저장 전에 모델별 reason 필드 처리
-    # 모델별 reason 필드가 있는지 확인하고 없으면 빈 열 추가
-    if llm_type == "openai" and "gpt_reason" not in df.columns:
-        df["gpt_reason"] = None
-    elif llm_type == "anthropic":
-        if "claude_reason" not in df.columns:
-            df["claude_reason"] = None
-        if "exaone_reason" not in df.columns:
-            df["exaone_reason"] = None
-    elif llm_type == "claude-bedrock" and "claude_reason" not in df.columns:
-        df["claude_reason"] = None
-    elif llm_type == "exaone" and "exaone_reason" not in df.columns:
-        df["exaone_reason"] = None
-    elif llm_type == "local_ai" and "local_ai_reason" not in df.columns:
-        df["local_ai_reason"] = None
-    
-    # 결과 저장
-    df.to_csv(os.path.join(result_folder, "classification_results.csv"), index=False, encoding="utf-8-sig")
-    
-    # 기본 통계 계산
-    # 스팸 문자열 기반으로 계산
-    spam_count = df["llm_is_spam"].apply(lambda x: "스팸" in str(x) if x is not None else False).sum()
-    total_count = len(df)
-    spam_ratio = spam_count / total_count if total_count > 0 else 0
-    
-    # 카테고리별 분포 (None 값 제외)
-    df["llm_category_clean"] = df["llm_category"].fillna("분류 없음")
-    category_counts = df["llm_category_clean"].value_counts()
-    
-    # LLM 분류와 기존 분류(있는 경우) 비교
-    comparison_df = None
-    if "AI 분류" in df.columns and "휴먼 분류" in df.columns:
-        comparison_df = pd.DataFrame({
-            "LLM 분류": df["llm_category_clean"],
-            "AI 분류": df["AI 분류"].fillna("분류 없음"),
-            "휴먼 분류": df["휴먼 분류"].fillna("분류 없음")
-        })
-    
-    # 결과 요약 저장
-    with open(os.path.join(result_folder, "classification_summary.txt"), "w", encoding="utf-8") as f:
-        f.write("# LLM 스팸 분류 결과 요약\n\n")
-        f.write(f"## 기본 통계\n")
-        f.write(f"- 총 메시지 수: {total_count}\n")
-        f.write(f"- 스팸으로 분류된 메시지 수: {spam_count}\n")
-        f.write(f"- 스팸 비율: {spam_ratio:.2%}\n\n")
-        
-        f.write(f"## 카테고리별 분포\n")
-        for category, count in category_counts.items():
-            f.write(f"- {category}: {count} ({count/total_count:.2%})\n")
-        
-        if comparison_df is not None:
-            f.write(f"\n## LLM 분류와 기존 분류 비교\n")
-            f.write("LLM 분류와 휴먼 분류 일치율: ")
-            match_rate = (comparison_df["LLM 분류"] == comparison_df["휴먼 분류"]).mean()
-            f.write(f"{match_rate:.2%}\n")
-    
-    # 시각화: 카테고리별 분포
-    if len(category_counts) > 0:
-        plt.figure(figsize=(12, 6))
-        sns.barplot(x=category_counts.values, y=category_counts.index)
-        plt.title('LLM 분류 카테고리 분포')
-        plt.tight_layout()
-        plt.savefig(os.path.join(result_folder, "category_distribution.png"))
-        plt.close()
-    else:
-        print("경고: 카테고리 분포를 시각화할 데이터가 없습니다.")
-    
-    # 시각화: 확신도 분포 (None 값 제외)
-    df["llm_confidence_clean"] = df["llm_confidence"].apply(lambda x: float(x) if x is not None else 0.0)
-    if df["llm_confidence_clean"].count() > 0:
+        # 시각화: 카테고리 분포
         plt.figure(figsize=(10, 6))
-        sns.histplot(df["llm_confidence_clean"], bins=20)
-        plt.title('LLM 분류 확신도 분포')
-        plt.xlabel('확신도')
-        plt.ylabel('빈도')
+        spam_types.plot(kind='bar')
+        plt.title('스팸 유형 분포')
+        plt.xlabel('스팸 유형')
+        plt.ylabel('메시지 수')
         plt.tight_layout()
-        plt.savefig(os.path.join(result_folder, "confidence_distribution.png"))
-        plt.close()
-    else:
-        print("경고: 확신도 분포를 시각화할 데이터가 없습니다.")
-    
-    # 시각화: LLM vs 휴먼 분류 (있는 경우)
-    if comparison_df is not None and len(comparison_df) > 0:
-        try:
-            plt.figure(figsize=(12, 8))
-            confusion_matrix = pd.crosstab(
-                comparison_df["LLM 분류"], 
-                comparison_df["휴먼 분류"],
-                normalize="index"
+        plt.savefig(f"{result_folder}/category_distribution.png")
+        
+        # 시각화: 신뢰도 분포
+        plt.figure(figsize=(10, 6))
+        plt.hist(results_df['confidence'], bins=10, alpha=0.7)
+        plt.axvline(confidence_mean, color='r', linestyle='--', label=f'평균: {confidence_mean:.2f}')
+        plt.title('신뢰도 분포')
+        plt.xlabel('신뢰도')
+        plt.ylabel('메시지 수')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"{result_folder}/confidence_distribution.png")
+        
+        # 인간 분류와 LLM 분류 비교 (인간 분류 데이터가 있는 경우)
+        if "human_classification" in results_df.columns:
+            # 혼동 행렬 데이터 준비
+            llm_vs_human = pd.crosstab(
+                results_df["is_spam"].apply(lambda x: "스팸" in x), 
+                results_df["human_classification"].apply(lambda x: "스팸" in str(x)),
+                rownames=['LLM 분류'], 
+                colnames=['인간 분류']
             )
-            sns.heatmap(confusion_matrix, annot=True, cmap="Blues", fmt=".2f")
-            plt.title('LLM 분류 vs 휴먼 분류')
+            
+            # 시각화: LLM vs 인간 분류
+            plt.figure(figsize=(8, 6))
+            plt.imshow(llm_vs_human, cmap='Blues')
+            
+            # 각 셀에 값 표시
+            for i in range(llm_vs_human.shape[0]):
+                for j in range(llm_vs_human.shape[1]):
+                    plt.text(j, i, llm_vs_human.iloc[i, j], 
+                            ha="center", va="center", color="black")
+            
+            plt.colorbar()
+            plt.title('LLM vs 인간 분류 비교')
+            plt.xticks([0, 1], ['비스팸', '스팸'])
+            plt.yticks([0, 1], ['비스팸', '스팸'])
             plt.tight_layout()
-            plt.savefig(os.path.join(result_folder, "llm_vs_human_classification.png"))
-            plt.close()
-        except Exception as e:
-            print(f"휴먼 분류 비교 시각화 오류: {e}")
-            # 오류 정보 저장
-            with open(os.path.join(result_folder, "visualization_error.txt"), "w", encoding="utf-8") as f:
-                f.write(f"# 시각화 오류 정보\n\n")
-                f.write(f"## 오류 메시지: {str(e)}\n")
+            plt.savefig(f"{result_folder}/llm_vs_human_classification.png")
+        
+        # 결과 반환
+        return {
+            "status": "success",
+            "result_folder": result_folder,
+            "spam_count": int(spam_count),
+            "spam_ratio": float(spam_ratio),
+            "confidence_mean": float(confidence_mean),
+            "token_usage": total_token_usage,
+            "token_cost": total_cost
+        }
+        
+    except Exception as e:
+        logger.error(f"결과 처리 중 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"결과 처리 중 오류: {e}"}
 
 # 메인 함수
-def main():
-    """메인 함수"""
-    try:
-        # 파일 경로 설정
-        file_path = FILE_PATHS["spam_list"]
-        
-        # 사용자 입력 받기 (실제 사용 시 구현)
-        print("스팸 분류 설정:")
-        print(f"1. 기본 LLM 유형: {SPAM_CLASSIFICATION_SETTINGS['default_llm_type']}")
-        print(f"2. 기본 샘플 크기: {SPAM_CLASSIFICATION_SETTINGS['default_sample_size']}")
-        
-        # 여기서는 기본값 사용
-        llm_type = SPAM_CLASSIFICATION_SETTINGS["default_llm_type"]
-        sample_size = SPAM_CLASSIFICATION_SETTINGS["default_sample_size"]
-        
-        # 스팸 분류 실행
-        df = classify_spam_messages(file_path, llm_type, sample_size)
-        
-        # 분류 결과 분석 및 시각화
-        analyze_classification_results(df, result_folder, llm_type)
-        
-        # 프롬프트 히스토리 업데이트
-        with open(prompt_history_file, "a", encoding="utf-8") as f:
-            f.write(f"### 결과: LLM 스팸 분류 완료\n")
-            f.write(f"- 분석된 메시지 수: {len(df)}\n")
-            f.write(f"- 사용된 LLM: {llm_type}\n")
-            f.write(f"- 사용된 모델: {LLM_SETTINGS[llm_type]['model']}\n")
-            f.write(f"- 결과 저장 위치: {os.path.abspath(result_folder)}\n\n")
-        
-        print(f"분석이 완료되었습니다. 결과는 '{result_folder}' 폴더에 저장되었습니다.")
-    
-    except Exception as e:
-        print(f"오류 발생: {e}")
-        
-        # 오류 정보 저장
-        with open(os.path.join(result_folder, "error_log.txt"), "w", encoding="utf-8") as f:
-            f.write(f"# 오류 정보\n\n")
-            f.write(f"## 발생 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"## 오류 메시지: {str(e)}\n")
-        
-        # 프롬프트 히스토리 업데이트
-        with open(prompt_history_file, "a", encoding="utf-8") as f:
-            f.write(f"### 오류 발생: {str(e)}\n")
-
-# 스크립트가 직접 실행될 때만 메인 함수 호출
 if __name__ == "__main__":
-    main() 
+    # 기본 파라미터
+    file_path = FILE_PATHS.get("spam_list_file", "./data/spam_list.xlsx")
+    llm_type = "openai"  # 기본값: OpenAI
+    sample_size = None  # 전체 데이터 사용
+    
+    # 명령줄 인자 처리
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+    if len(sys.argv) > 2:
+        llm_type = sys.argv[2]
+    if len(sys.argv) > 3:
+        sample_size = int(sys.argv[3])
+    
+    # 스팸 분류 실행
+    result = run_spam_classification(file_path, llm_type, sample_size)
+    
+    # 결과 출력
+    if "error" in result:
+        logger.error(f"오류: {result['error']}")
+    else:
+        logger.info(f"분류 완료! 결과 폴더: {result['result_folder']}")
+        logger.info(f"스팸 비율: {result['spam_ratio']:.1%}")
+        logger.info(f"평균 신뢰도: {result['confidence_mean']:.2f}")
+        logger.info(f"총 토큰 사용량: 입력 {result['token_usage']['input_tokens']:,}, 출력 {result['token_usage']['output_tokens']:,}")
+        logger.info(f"총 비용: ${result['token_cost']['total_cost']:.6f}") 

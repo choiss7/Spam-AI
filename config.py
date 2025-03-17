@@ -43,6 +43,30 @@ EXAONE_SETTINGS = {
     "token_limit": int(os.getenv("EXAONE_MODEL_TOKEN_LIMIT", "4096"))
 }
 
+# LLM 가격 정보 (USD 기준, 백만 토큰당)
+LLM_PRICING = {
+    "openai": {
+        "input": float(os.getenv("OPENAI_PRICE_INPUT", "5.0")),  # GPT-4o 입력 토큰 가격: 백만 토큰당 $5
+        "output": float(os.getenv("OPENAI_PRICE_OUTPUT", "15.0"))  # GPT-4o 출력 토큰 가격: 백만 토큰당 $15
+    },
+    "anthropic": {
+        "input": float(os.getenv("ANTHROPIC_PRICE_INPUT", "15.0")),  # Claude 3 Opus 입력 토큰 가격: 백만 토큰당 $15
+        "output": float(os.getenv("ANTHROPIC_PRICE_OUTPUT", "75.0"))  # Claude 3 Opus 출력 토큰 가격: 백만 토큰당 $75
+    },
+    "claude-bedrock": {
+        "input": float(os.getenv("CLAUDE_BEDROCK_PRICE_INPUT", "3.0")),  # Claude 3.5 Sonnet 입력 토큰 가격: 백만 토큰당 $3
+        "output": float(os.getenv("CLAUDE_BEDROCK_PRICE_OUTPUT", "15.0"))  # Claude 3.5 Sonnet 출력 토큰 가격: 백만 토큰당 $15
+    },
+    "local_ai": {
+        "input": float(os.getenv("LOCAL_AI_PRICE_INPUT", "0.0")),  # Local AI 입력 토큰 가격: 무료
+        "output": float(os.getenv("LOCAL_AI_PRICE_OUTPUT", "0.0"))  # Local AI 출력 토큰 가격: 무료
+    },
+    "exaone": {
+        "input": float(os.getenv("EXAONE_PRICE_INPUT", "0.0")),  # ExaOne 입력 토큰 가격: 무료
+        "output": float(os.getenv("EXAONE_PRICE_OUTPUT", "0.0"))  # ExaOne 출력 토큰 가격: 무료
+    }
+}
+
 # LLM 설정
 LLM_SETTINGS = {
     "openai": {

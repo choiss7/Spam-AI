@@ -16,14 +16,17 @@ from datetime import datetime
 from config import (
     SPAM_CLASSIFICATION_SETTINGS,
     LLM_SETTINGS,
-    FILE_PATHS
+    FILE_PATHS,
+    DEFAULT_LLM_PROVIDER,
+    LLM_PRICING
 )
 
 # 스팸 분류 모듈 가져오기
 try:
     from spam_classifier_llm import (
         classify_spam_messages,
-        analyze_classification_results
+        analyze_classification_results,
+        run_spam_classification
     )
     # 사용 가능한 LLM 유형 확인
     from spam_classifier_llm import OPENAI_AVAILABLE, ANTHROPIC_AVAILABLE, BEDROCK_AVAILABLE
@@ -115,6 +118,13 @@ def display_settings(args, output_folder, branch_name=None):
             print(f"- Local AI 모델: {LOCAL_AI_SETTINGS['model']}")
         else:
             print(f"- {llm_type.upper()} 모델: {LLM_SETTINGS[llm_type]['model']}")
+        
+        # LLM 가격 정보 표시
+        if llm_type in LLM_PRICING:
+            pricing = LLM_PRICING[llm_type]
+            print(f"  - {llm_type.upper()} 가격 정보:")
+            print(f"    * 입력 토큰: 백만 토큰당 ${pricing['input']:.2f}")
+            print(f"    * 출력 토큰: 백만 토큰당 ${pricing['output']:.2f}")
     
     if args.sample == 0:
         print("샘플 크기: 전체 데이터")
@@ -127,7 +137,7 @@ def display_settings(args, output_folder, branch_name=None):
         print(f"Git 브랜치: {branch_name}")
     elif args.no_git:
         print("Git 브랜치: 비활성화됨")
-        
+    
     print("=====================\n")
 
 def run_git_command(command, error_message=None):
