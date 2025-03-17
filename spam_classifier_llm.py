@@ -633,6 +633,7 @@ def run_spam_classification(
             "message": message_content,
             "classification": result,
             "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
+            "explanation": result.get("explanation", ""),  # 분류 이유 필드 추가
             "input_tokens": token_usage["input_tokens"],
             "output_tokens": token_usage["output_tokens"],
             "input_cost": token_cost["input_cost"],
@@ -704,6 +705,7 @@ def run_spam_classification(
                 "message": message_content,
                 "classification": result,
                 "spam_criteria": result.get("spam_criteria", ""),  # 스팸 분류 기준 추가
+                "explanation": result.get("explanation", ""),  # 분류 이유 필드 추가
                 "input_tokens": token_usage["input_tokens"],
                 "output_tokens": token_usage["output_tokens"],
                 "input_cost": token_cost["input_cost"],
