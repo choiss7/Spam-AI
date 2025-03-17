@@ -283,6 +283,26 @@ def run_spam_classification(
         df = pd.read_excel(file_path)
         logger.info(f"데이터가 로드되었습니다. 행 수: {len(df)}")
         
+        # 빈 메시지 제거
+        valid_messages = []
+        for idx, row in df.iterrows():
+            message_content = ""
+            if "메시지내용" in row:
+                message_content = str(row["메시지내용"])
+            elif "message_content" in row:
+                message_content = str(row["message_content"])
+            elif "content" in row:
+                message_content = str(row["content"])
+            
+            if not pd.isna(message_content) and message_content.strip() != "":
+                valid_messages.append(idx)
+            else:
+                logger.warning(f"행 {idx}에 빈 메시지가 있습니다. 건너뜁니다.")
+        
+        # 유효한 메시지만 선택
+        df = df.loc[valid_messages]
+        logger.info(f"유효한 메시지 수: {len(df)}")
+        
         # 샘플 크기 설정
         if sample_size is not None and sample_size > 0 and sample_size < len(df):
             df = df.sample(sample_size, random_state=42)
