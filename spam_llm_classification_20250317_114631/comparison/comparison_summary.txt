@@ -1,0 +1,17 @@
+# LLM 모델 비교 분석 결과 요약
+
+## 비교된 LLM 모델
+- OPENAI: gpt-4o
+- EXAONE: /models/exaone
+
+## 분석된 메시지 수: 5
+
+
+## LLM 모델 간 일치율
+- OPENAI vs EXAONE:
+  - 스팸 여부 일치율: 80.00%
+  - 카테고리 일치율: 60.00%
+
+## 각 LLM 모델별 스팸 비율
+- OPENAI: 60.00%
+- EXAONE: 80.00%

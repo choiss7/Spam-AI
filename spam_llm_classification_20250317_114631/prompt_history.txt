@@ -1,0 +1,25 @@
+# 스팸 리스트 LLM 분류 프롬프트 히스토리
+
+## 분석 시작 시간: 2025-03-17 11:46:31
+
+### 명령줄 인수:
+- 파일 경로: data/스팸리스트_20250310_개인정보_삭제.xlsx
+- LLM 유형: openai, exaone
+- 샘플 크기: 5
+- 결과 저장 경로: spam_llm_classification_20250317_114631
+- Git 브랜치: 20250317_1146
+
+### OPENAI 모델 스팸 분류 완료
+- 분석된 메시지 수: 5
+- 사용된 모델: gpt-4o
+- 결과 저장 위치: D:\dev\study\spam-AI\spam_llm_classification_20250317_114631\openai
+
+### EXAONE 모델 스팸 분류 완료
+- 분석된 메시지 수: 5
+- 사용된 모델: /models/exaone
+- 결과 저장 위치: D:\dev\study\spam-AI\spam_llm_classification_20250317_114631\exaone
+
+### LLM 모델 결과 비교 분석 완료
+- 비교된 모델: openai, exaone
+- 결과 저장 위치: D:\dev\study\spam-AI\spam_llm_classification_20250317_114631\comparison
+
