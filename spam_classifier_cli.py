@@ -3,7 +3,7 @@
 
 """
 스팸 분류 명령줄 인터페이스
-LLM(GPT, Claude, Local AI)을 사용하여 스팸 메시지를 분류하는 CLI 도구
+LLM(GPT, Claude, Claude Sonnet 3.5, ExaOne, Local AI)을 사용하여 스팸 메시지를 분류하는 CLI 도구
 """
 
 import argparse
@@ -26,7 +26,7 @@ try:
         analyze_classification_results
     )
     # 사용 가능한 LLM 유형 확인
-    from spam_classifier_llm import OPENAI_AVAILABLE, ANTHROPIC_AVAILABLE
+    from spam_classifier_llm import OPENAI_AVAILABLE, ANTHROPIC_AVAILABLE, BEDROCK_AVAILABLE
 except ImportError as e:
     print(f"오류: 필요한 모듈을 가져올 수 없습니다: {e}")
     sys.exit(1)
@@ -34,7 +34,7 @@ except ImportError as e:
 def parse_arguments():
     """명령줄 인수를 파싱합니다."""
     parser = argparse.ArgumentParser(
-        description="LLM(GPT, Claude, Local AI)을 사용하여 스팸 메시지를 분류합니다."
+        description="LLM(GPT, Claude, Claude Sonnet 3.5, ExaOne, Local AI)을 사용하여 스팸 메시지를 분류합니다."
     )
     
     # 필수 인수
@@ -46,11 +46,13 @@ def parse_arguments():
     )
     
     # 사용 가능한 LLM 유형 결정
-    available_llm_types = ["local_ai"]
+    available_llm_types = ["local_ai", "exaone"]
     if 'OPENAI_AVAILABLE' in globals() and OPENAI_AVAILABLE:
         available_llm_types.append("openai")
     if 'ANTHROPIC_AVAILABLE' in globals() and ANTHROPIC_AVAILABLE:
         available_llm_types.append("anthropic")
+    if 'BEDROCK_AVAILABLE' in globals() and BEDROCK_AVAILABLE:
+        available_llm_types.append("claude-bedrock")
     
     # 선택적 인수
     parser.add_argument(

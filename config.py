@@ -26,13 +26,21 @@ LOCAL_AI_SETTINGS = {
     "token_limit": int(os.getenv("LOCAL_AI_MODEL_TOKEN_LIMIT", "4096"))
 }
 
-# AWS Bedrock 설정
+# AWS Bedrock 설정 (Claude Sonnet 3.5 사용)
 AWS_BEDROCK_SETTINGS = {
     "access_key_id": os.getenv("AWS_BEDROCK_LLM_ACCESS_KEY_ID", ""),
     "access_key": os.getenv("AWS_BEDROCK_LLM_ACCESS_KEY", ""),
     "region": os.getenv("AWS_BEDROCK_LLM_REGION", "ap-northeast-2"),
     "model": os.getenv("AWS_BEDROCK_LLM_MODEL_PREFERENCE", "anthropic.claude-3-5-sonnet-20240620-v1:0"),
     "token_limit": int(os.getenv("AWS_BEDROCK_LLM_MODEL_TOKEN_LIMIT", "4096"))
+}
+
+# ExaOne 설정
+EXAONE_SETTINGS = {
+    "base_url": os.getenv("EXAONE_BASE_PATH", LOCAL_AI_SETTINGS["base_url"]),
+    "model": os.getenv("EXAONE_MODEL_PREF", "/models/exaone"),
+    "api_key": os.getenv("EXAONE_API_KEY", LOCAL_AI_SETTINGS["api_key"]),
+    "token_limit": int(os.getenv("EXAONE_MODEL_TOKEN_LIMIT", "4096"))
 }
 
 # LLM 설정
@@ -49,17 +57,23 @@ LLM_SETTINGS = {
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
         "token_limit": ANTHROPIC_MODEL_TOKEN_LIMIT
     },
+    "claude-bedrock": {
+        "model": AWS_BEDROCK_SETTINGS["model"],
+        "max_tokens": 1024,
+        "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
+        "token_limit": AWS_BEDROCK_SETTINGS["token_limit"]
+    },
     "local_ai": {
         "model": LOCAL_AI_SETTINGS["model"],
         "max_tokens": 1024,
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
         "token_limit": LOCAL_AI_SETTINGS["token_limit"]
     },
-    "bedrock": {
-        "model": AWS_BEDROCK_SETTINGS["model"],
+    "exaone": {
+        "model": EXAONE_SETTINGS["model"],
         "max_tokens": 1024,
         "temperature": 0.0,  # 낮은 온도로 일관된 결과 유도
-        "token_limit": AWS_BEDROCK_SETTINGS["token_limit"]
+        "token_limit": EXAONE_SETTINGS["token_limit"]
     }
 }
 

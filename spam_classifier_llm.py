@@ -35,6 +35,7 @@ from config import (
     ANTHROPIC_API_KEY, 
     LOCAL_AI_SETTINGS,
     AWS_BEDROCK_SETTINGS,
+    EXAONE_SETTINGS,
     LLM_SETTINGS, 
     SPAM_CLASSIFICATION_SETTINGS,
     SYSTEM_PROMPT_TEMPLATE,
@@ -83,7 +84,7 @@ def initialize_llm_clients():
     else:
         print("Anthropic API 키가 설정되지 않았거나 모듈이 설치되지 않았습니다.")
     
-    # AWS Bedrock 클라이언트 초기화
+    # AWS Bedrock 클라이언트 초기화 (Claude Sonnet 3.5 사용)
     if BEDROCK_AVAILABLE and AWS_BEDROCK_SETTINGS["access_key_id"] and AWS_BEDROCK_SETTINGS["access_key"]:
         try:
             bedrock_runtime = boto3.client(
@@ -92,8 +93,8 @@ def initialize_llm_clients():
                 aws_access_key_id=AWS_BEDROCK_SETTINGS["access_key_id"],
                 aws_secret_access_key=AWS_BEDROCK_SETTINGS["access_key"]
             )
-            clients["bedrock"] = bedrock_runtime
-            print("AWS Bedrock 클라이언트가 초기화되었습니다.")
+            clients["claude-bedrock"] = bedrock_runtime
+            print("AWS Bedrock 클라이언트가 초기화되었습니다. (Claude Sonnet 3.5)")
         except Exception as e:
             print(f"AWS Bedrock 클라이언트 초기화 실패: {e}")
     else:
@@ -105,6 +106,13 @@ def initialize_llm_clients():
         "api_key": LOCAL_AI_SETTINGS["api_key"]
     }
     print("Local AI 설정이 초기화되었습니다.")
+    
+    # ExaOne 설정
+    clients["exaone"] = {
+        "base_url": EXAONE_SETTINGS["base_url"],
+        "api_key": EXAONE_SETTINGS["api_key"]
+    }
+    print("ExaOne 설정이 초기화되었습니다.")
     
     return clients
 
@@ -282,10 +290,91 @@ def classify_with_local_ai(client_settings, message_content, system_prompt=None)
             "model": LLM_SETTINGS["local_ai"]["model"]
         }
 
-# AWS Bedrock을 사용한 스팸 분류 함수
-def classify_with_bedrock(client, message_content, system_prompt=None):
+# ExaOne을 사용한 스팸 분류 함수
+def classify_with_exaone(client_settings, message_content, system_prompt=None):
     """
-    AWS Bedrock을 사용하여 메시지를 스팸으로 분류합니다.
+    ExaOne을 사용하여 메시지를 스팸으로 분류합니다.
+    
+    Args:
+        client_settings: ExaOne 설정
+        message_content: 분류할 메시지 내용
+        system_prompt: 시스템 프롬프트 (기본값: None)
+        
+    Returns:
+        분류 결과 딕셔너리
+    """
+    if system_prompt is None:
+        system_prompt = SYSTEM_PROMPT_TEMPLATE
+    
+    try:
+        base_url = client_settings["base_url"]
+        api_key = client_settings["api_key"]
+        model = LLM_SETTINGS["exaone"]["model"]
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message_content}
+            ],
+            "temperature": LLM_SETTINGS["exaone"]["temperature"],
+            "max_tokens": LLM_SETTINGS["exaone"]["max_tokens"]
+        }
+        
+        response = requests.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=data
+        )
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            content = response_data["choices"][0]["message"]["content"]
+            
+            try:
+                result = json.loads(content)
+                result["model"] = model
+                return result
+            except json.JSONDecodeError:
+                print(f"JSON 파싱 오류: {content}")
+                return {
+                    "is_spam": None,
+                    "category": None,
+                    "confidence": 0,
+                    "reason": "JSON 파싱 오류",
+                    "model": model
+                }
+        else:
+            print(f"ExaOne API 오류: {response.status_code} - {response.text}")
+            return {
+                "is_spam": None,
+                "category": None,
+                "confidence": 0,
+                "reason": f"API 오류: {response.status_code}",
+                "model": model
+            }
+    
+    except Exception as e:
+        print(f"ExaOne 분류 오류: {e}")
+        return {
+            "is_spam": None,
+            "category": None,
+            "confidence": 0,
+            "reason": f"오류 발생: {str(e)}",
+            "model": LLM_SETTINGS["exaone"]["model"]
+        }
+
+# AWS Bedrock을 통한 Claude Sonnet 3.5 사용 함수
+def classify_with_claude_bedrock(client, message_content, system_prompt=None):
+    """
+    AWS Bedrock을 통해 Claude Sonnet 3.5를 사용하여 메시지를 스팸으로 분류합니다.
     
     Args:
         client: AWS Bedrock 클라이언트
@@ -301,28 +390,16 @@ def classify_with_bedrock(client, message_content, system_prompt=None):
     try:
         model_id = AWS_BEDROCK_SETTINGS["model"]
         
-        # 모델 ID에 따라 요청 형식 결정
-        if "anthropic" in model_id:
-            # Anthropic Claude 모델 형식
-            request_body = {
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": LLM_SETTINGS["bedrock"]["max_tokens"],
-                "temperature": LLM_SETTINGS["bedrock"]["temperature"],
-                "system": system_prompt,
-                "messages": [
-                    {"role": "user", "content": message_content}
-                ]
-            }
-        else:
-            # 기본 형식 (다른 모델 지원 시 추가)
-            print(f"지원되지 않는 Bedrock 모델: {model_id}")
-            return {
-                "is_spam": None,
-                "category": None,
-                "confidence": 0,
-                "reason": f"지원되지 않는 모델: {model_id}",
-                "model": model_id
-            }
+        # Claude 모델 형식
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": LLM_SETTINGS["claude-bedrock"]["max_tokens"],
+            "temperature": LLM_SETTINGS["claude-bedrock"]["temperature"],
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": message_content}
+            ]
+        }
         
         response = client.invoke_model(
             modelId=model_id,
@@ -330,11 +407,7 @@ def classify_with_bedrock(client, message_content, system_prompt=None):
         )
         
         response_body = json.loads(response.get("body").read())
-        
-        if "anthropic" in model_id:
-            content = response_body.get("content", [{}])[0].get("text", "")
-        else:
-            content = response_body.get("content", "")
+        content = response_body.get("content", [{}])[0].get("text", "")
         
         try:
             result = json.loads(content)
@@ -351,7 +424,7 @@ def classify_with_bedrock(client, message_content, system_prompt=None):
             }
     
     except Exception as e:
-        print(f"AWS Bedrock 분류 오류: {e}")
+        print(f"Claude Bedrock 분류 오류: {e}")
         return {
             "is_spam": None,
             "category": None,
@@ -367,7 +440,7 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     
     Args:
         file_path: 스팸 리스트 엑셀 파일 경로
-        llm_type: 사용할 LLM 유형 ('openai', 'anthropic', 'bedrock', 'local_ai')
+        llm_type: 사용할 LLM 유형 ('openai', 'anthropic', 'claude-bedrock', 'local_ai', 'exaone')
         sample_size: 샘플 크기 (None인 경우 전체 데이터 사용)
         
     Returns:
@@ -408,7 +481,11 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
     elif llm_type == "anthropic":
         df["claude_reason"] = None
         df["exaone_reason"] = None
-    else:
+    elif llm_type == "claude-bedrock":
+        df["claude_reason"] = None
+    elif llm_type == "exaone":
+        df["exaone_reason"] = None
+    else:  # local_ai
         df["local_ai_reason"] = None
         
     df["llm_model"] = None
@@ -418,8 +495,10 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         classify_func = lambda msg: classify_with_gpt(clients["openai"], msg)
     elif llm_type == "anthropic":
         classify_func = lambda msg: classify_with_claude(clients["anthropic"], msg)
-    elif llm_type == "bedrock":
-        classify_func = lambda msg: classify_with_bedrock(clients["bedrock"], msg)
+    elif llm_type == "claude-bedrock":
+        classify_func = lambda msg: classify_with_claude_bedrock(clients["claude-bedrock"], msg)
+    elif llm_type == "exaone":
+        classify_func = lambda msg: classify_with_exaone(clients["exaone"], msg)
     else:  # local_ai
         classify_func = lambda msg: classify_with_local_ai(clients["local_ai"], msg)
     
@@ -442,6 +521,10 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
                     df.at[i, "gpt_reason"] = "메시지 내용이 비어 있습니다."
                 elif llm_type == "anthropic":
                     df.at[i, "claude_reason"] = "메시지 내용이 비어 있습니다."
+                    df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
+                elif llm_type == "claude-bedrock":
+                    df.at[i, "claude_reason"] = "메시지 내용이 비어 있습니다."
+                elif llm_type == "exaone":
                     df.at[i, "exaone_reason"] = "메시지 내용이 비어 있습니다."
                 else:
                     df.at[i, "local_ai_reason"] = "메시지 내용이 비어 있습니다."
@@ -466,6 +549,10 @@ def classify_spam_messages(file_path, llm_type=None, sample_size=None):
         elif llm_type == "anthropic":
             df.at[i, "claude_reason"] = result.get("reason")
             df.at[i, "exaone_reason"] = result.get("reason")
+        elif llm_type == "claude-bedrock":
+            df.at[i, "claude_reason"] = result.get("reason")
+        elif llm_type == "exaone":
+            df.at[i, "exaone_reason"] = result.get("reason")
         else:
             df.at[i, "local_ai_reason"] = result.get("reason")
             
@@ -484,7 +571,7 @@ def analyze_classification_results(df, result_folder, llm_type=None):
     Args:
         df: 분류 결과가 포함된 데이터프레임
         result_folder: 결과를 저장할 폴더 경로
-        llm_type: 사용된 LLM 유형 (openai, anthropic, local_ai)
+        llm_type: 사용된 LLM 유형 (openai, anthropic, claude-bedrock, local_ai, exaone)
     """
     # 결과 저장 전에 모델별 reason 필드 처리
     # 모델별 reason 필드가 있는지 확인하고 없으면 빈 열 추가
@@ -495,6 +582,10 @@ def analyze_classification_results(df, result_folder, llm_type=None):
             df["claude_reason"] = None
         if "exaone_reason" not in df.columns:
             df["exaone_reason"] = None
+    elif llm_type == "claude-bedrock" and "claude_reason" not in df.columns:
+        df["claude_reason"] = None
+    elif llm_type == "exaone" and "exaone_reason" not in df.columns:
+        df["exaone_reason"] = None
     elif llm_type == "local_ai" and "local_ai_reason" not in df.columns:
         df["local_ai_reason"] = None
     
