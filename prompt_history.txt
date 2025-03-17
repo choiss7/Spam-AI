@@ -53,4 +53,11 @@
 - 수정 내용:
   1. 결과 데이터프레임 생성 시 classification 결과에서 explanation 필드를 추출하도록 수정
   2. 결과 저장 시 모든 row_result에 explanation 필드 직접 추가
-- 커밋: "결과 저장 시 explanation 필드 추가" 
+- 커밋: "결과 저장 시 explanation 필드 추가"
+
+### 3. CSV 파일 필드 정리
+- 기능: 결과 CSV 파일에서 불필요한 필드 제거
+- 수정 내용:
+  1. 결과 CSV 파일에서 classification과 spam_criteria 항목 삭제
+  2. 내부 처리에는 여전히 필요한 필드이므로 저장 시에만 제외
+- 커밋: "CSV 파일에서 classification과 spam_criteria 항목 삭제" 
